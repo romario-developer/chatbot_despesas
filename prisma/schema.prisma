@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int        @id @default(autoincrement())
+  telegramId  String     @unique
+  createdAt   DateTime   @default(now())
+  categories  Category[]
+  expenses    Expense[]
+  drafts      ExpenseDraft[]
+  session     UserSession?
+}
+
+model Category {
+  id             Int        @id @default(autoincrement())
+  userId         Int
+  name           String
+  normalizedName String
+  createdAt      DateTime   @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+  drafts   ExpenseDraft[]
+
+  @@unique([userId, normalizedName])
+}
+
+model Expense {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  categoryId   Int
+  amountCents  Int
+  description  String
+  date         DateTime
+  source       String
+  rawText      String
+  createdAt    DateTime  @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+model ExpenseDraft {
+  id          String    @id @default(cuid())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountCents Int
+  description String
+  date        DateTime
+  categoryId  Int
+  category    Category  @relation(fields: [categoryId], references: [id])
+  rawText     String
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model UserSession {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode      String?
+  draftId   String?
+  updatedAt DateTime @updatedAt
+}
