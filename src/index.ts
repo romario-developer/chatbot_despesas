@@ -3,6 +3,7 @@ import express from 'express';
 import { webhookCallback } from 'grammy';
 import './utils/dates';
 import { createBot } from './bot/bot';
+import type { Request, Response } from "express";
 
 dotenv.config();
 process.env.TZ = 'America/Bahia';
@@ -21,8 +22,8 @@ const app = express();
 
 app.use(express.json());
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
+app.get("/health", (_req: Request, res: Response) => {
+  res.json({ ok: true });
 });
 
 if (USE_WEBHOOK && WEBHOOK_URL) {
