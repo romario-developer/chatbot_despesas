@@ -8,9 +8,9 @@ datasource db {
 }
 
 model User {
-  id          Int        @id @default(autoincrement())
-  telegramId  String     @unique
-  createdAt   DateTime   @default(now())
+  id          Int            @id @default(autoincrement())
+  telegramId  String         @unique
+  createdAt   DateTime       @default(now())
   categories  Category[]
   expenses    Expense[]
   drafts      ExpenseDraft[]
@@ -18,13 +18,13 @@ model User {
 }
 
 model Category {
-  id             Int        @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   userId         Int
   name           String
   normalizedName String
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime       @default(now())
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses Expense[]
   drafts   ExpenseDraft[]
 

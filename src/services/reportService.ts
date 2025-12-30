@@ -18,14 +18,17 @@ export async function getMonthlyReport(telegramId: string, month: number, year: 
     orderBy: { date: 'desc' },
   });
 
-  const totalCents = expenses.reduce((sum, e) => sum + e.amountCents, 0);
+  const totalCents = expenses.reduce(
+    (sum: number, e: typeof expenses[number]) => sum + e.amountCents,
+    0,
+  );
 
   const categoryMap = new Map<
     number,
     { name: string; totalCents: number; count: number }
   >();
 
-  expenses.forEach((exp) => {
+  expenses.forEach((exp: typeof expenses[number]) => {
     const current = categoryMap.get(exp.categoryId) ?? {
       name: exp.category.name,
       totalCents: 0,

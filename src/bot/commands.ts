@@ -140,7 +140,7 @@ export async function sendCategorias(ctx: any) {
     return;
   }
 
-  const names = categories.map((c) => `- ${c.name}`).join('\n');
+  const names = categories.map((c: { name: string }) => `- ${c.name}`).join('\n');
   await ctx.reply(`Categorias:\n${names}`, { reply_markup: buildMenuKeyboard() });
 }
 
