@@ -1,88 +1,101 @@
-# Chatbot de Despesas (Telegram + Prisma + SQLite)
+# Chatbot de Despesas (Telegram + Prisma + Postgres)
 
-Bot de controle de despesas pessoais em PT-BR, multiusuário por `telegram_id`, usando Node.js, TypeScript, Prisma e SQLite.
+Bot em Node.js/TypeScript para registrar despesas via Telegram (grammY) e uma API REST para consumo por um PWA. Banco em Postgres com Prisma.
 
 ## Requisitos
 - Node.js 20+
 - npm
+- Postgres (ou SQLite apenas para desenvolvimento local, ajustando `DATABASE_URL`)
 
-## Criar o bot no BotFather
-1. No Telegram, fale com **@BotFather**.
-2. Envie `/newbot` e escolha nome e @username.
-3. Copie o *token* gerado e coloque em `BOT_TOKEN` no `.env`.
-4. Opcional: defina uma descrição e comandos rápidos com `/setdescription`, `/setabouttext` e `/setcommands`.
+## Variaveis de ambiente
+- `BOT_TOKEN`: token do bot no BotFather.
+- `DATABASE_URL`: URL do Postgres (ex.: `postgresql://user:pass@host:5432/db`).
+- `ADMIN_PASSWORD`: senha unica para login na API.
+- `JWT_SECRET`: segredo para assinar os JWTs da API.
+- `PWA_ORIGIN`: origem permitida para CORS (ex.: `https://despesas-pwa.onrender.com`).
+- `PORT`: porta HTTP (padrao 3000).
+- `NODE_ENV`: `development` ou `production`.
+- `USE_WEBHOOK`: `true` para webhook, `false` para polling local.
+- `WEBHOOK_URL`: URL publica para registrar webhook (se nao usar `RENDER_EXTERNAL_URL`).
 
-## Configuração
-1. Instale dependências:
+## Configuracao rapida
+1. Instale dependencias:
    ```bash
    npm install
    ```
-2. Crie o arquivo `.env` (existe um exemplo em `.env.example`):
-   ```
+2. Crie `.env` a partir de `.env.example`:
+   ```env
    BOT_TOKEN=<token do BotFather>
-   DATABASE_URL="file:./dev.db"
+   DATABASE_URL=<sua URL do Postgres>
+   ADMIN_PASSWORD=<senha para login na API>
+   JWT_SECRET=<segredo forte>
+   PWA_ORIGIN=https://despesas-pwa.onrender.com
    PORT=3000
    NODE_ENV=development
    USE_WEBHOOK=false
    WEBHOOK_URL=
    ```
-3. Rode as migrações e gere o cliente Prisma:
+3. Rode as migracoes e gere o client Prisma:
    ```bash
    npm run prisma:migrate
    ```
+4. Executar:
+   - Desenvolvimento (polling): `npm run dev`
+   - Producao (build + start): `npm run build && npm start`
+   - Healthcheck: `GET /health`
 
-## Execução
-- Desenvolvimento (polling padrão):
-  ```bash
-  npm run dev
-  ```
-- Produção (build + start):
-  ```bash
-  npm run build
-  npm start
-  ```
-- Healthcheck HTTP: `GET /health`
+### Webhook (Render)
+- Render expoe `RENDER_EXTERNAL_URL`; se quiser sobrescrever, defina `WEBHOOK_URL`.
+- Com `USE_WEBHOOK=true`, o app registra webhook em `/webhook`.
 
-### Webhook (opcional)
-Se quiser usar webhook em vez de polling:
-1. Publique o servidor em uma URL pública (HTTPS).
-2. No `.env`, defina `USE_WEBHOOK=true` e `WEBHOOK_URL=https://sua-url.com`.
-3. Inicie o app (`npm start` ou `npm run dev`). O bot registra o webhook em `/webhook`.
+## API REST (/api)
+- Autenticacao: Bearer token (JWT). Obtenha via `POST /api/auth/login` enviando `{ "password": "<ADMIN_PASSWORD>" }`. Token expira em 7 dias.
+- CORS: apenas `PWA_ORIGIN` (e `http://localhost:5173` em desenvolvimento) sao aceitos.
+- Modelagem: reutiliza `Expense` (Prisma). Valores sao armazenados em centavos; a API expoe `amount` como numero decimal.
 
-## Como usar (mensagens e comandos)
-- Envie textos livres com valor, ex:
-  - `paguei 35 no diesel`
-  - `mercado 128,90`
-  - `pix 60 pro João categoria serviços`
-  - `ração 210 animais`
-  - `luz 180 categoria contas`
-- Regras:
-  - Valor: aceita `10`, `10,50`, `10.50`, `R$ 10,50`.
-  - Data: se não informar, usa hoje (America/Bahia). Aceita `hoje`, `ontem`, `25/12`, `25/12/2025`, `2025-12-25`.
-  - Categoria: `categoria X`, ou inferida por palavras-chave (diesel/combustível, mercado, funcionário, ração, energia/luz/água/internet). Caso contrário, usa **Outros** e cria a categoria se necessário.
-  - Descrição: texto restante após remover valor, data e `categoria X`. Se vazio, usa "Sem descrição".
-- Fluxo com confirmação:
-  - Toda mensagem vira um *rascunho* de despesa (ExpenseDraft) com teclado: Confirmar / Editar / Cancelar.
-  - Nada é salvo definitivamente sem clicar em **Confirmar**.
-  - Edição guiada: escolha o campo no teclado (Valor, Categoria, Descrição, Data), informe o novo dado, e o bot reexibe o resumo para confirmar.
+### Endpoints
+- `POST /api/auth/login` - retorna `{ token }`.
+- `GET /api/entries?from=YYYY-MM-DD&to=YYYY-MM-DD&category=...&q=...` - lista, ordenada por `date` desc.
+- `POST /api/entries` - body `{ amount, description, category, date: "YYYY-MM-DD" }`.
+- `PUT /api/entries/:id` - body parcial (amount/description/category/date).
+- `DELETE /api/entries/:id`
+- `GET /api/categories` - lista unica de categorias.
+- `GET /api/summary?month=YYYY-MM` - `total`, `totalPorCategoria`, `totalPorDia` do mes.
 
-Comandos:
-- `/start` — instruções rápidas
-- `/ajuda` — lista de comandos
-- `/relatorio mes` — relatório do mês atual
-- `/relatorio MM/AAAA` — relatório de mês específico
-- `/categorias` — lista de categorias do usuário
-- `/editar ID campo novo_valor` — edita `valor`, `descricao`, `categoria` ou `data`
-  - Ex: `/editar 12 valor 40,50`
-  - Ex: `/editar 12 data 25/12/2025`
-- `/remover ID` — remove despesa do usuário
+### Exemplos (curl)
+```bash
+# Login
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"password":"<ADMIN_PASSWORD>"}'
 
-Confirmação de registro:
+# Listar lancamentos (token de login em $TOKEN)
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/entries?from=2025-01-01&to=2025-01-31"
+
+# Criar lancamento
+curl -X POST http://localhost:3000/api/entries \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":120.5,"description":"Mercado","category":"Supermercado","date":"2025-01-05"}'
+
+# Atualizar lancamento
+curl -X PUT http://localhost:3000/api/entries/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"Alimentacao"}'
+
+# Resumo do mes
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/summary?month=2025-01"
 ```
-Registrei: R$ 35,00 — diesel — categoria Combustível — 29/12/2025 — ID #12
-```
+
+## Telegram (bot)
+- Crie o bot com o BotFather e defina `BOT_TOKEN`.
+- Fluxo: usuario envia mensagem com valor/data/categoria; o bot cria rascunho, permite confirmar/editar/cancelar.
+- Comandos principais: `/start`, `/ajuda`, `/relatorio mes`, `/relatorio MM/AAAA`, `/categorias`, `/editar`, `/remover`.
 
 ## Notas
-- Fuso horário fixo: `America/Bahia` para parsing e formatação.
-- Categorias são por usuário; novas categorias são criadas automaticamente.
-- Banco padrão SQLite (`dev.db`); ajuste `DATABASE_URL` se necessário.
+- Fuso horario: `America/Bahia` para parsing e formatacao.
+- Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.
+- Deploy no Render usa `npm run start:render` (faz `prisma migrate deploy` antes de subir o servidor).

@@ -20,13 +20,17 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^6.19.1",
+    "cors": "^2.8.5",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "grammy": "^1.38.4"
+    "grammy": "^1.38.4",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/cors": "^2.8.19",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.3",
     "prisma": "^6.19.1",
     "tsx": "^4.21.0",
