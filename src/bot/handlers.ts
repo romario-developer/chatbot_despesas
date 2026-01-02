@@ -9,6 +9,7 @@ import { getOrCreateCategory } from '../services/categoryService';
 import { getOrCreateUser } from '../services/userService';
 import { amountStringToCents } from '../utils/money';
 import { parseDateFromText } from '../utils/dates';
+import { confirmAndExecuteReset } from '../services/resetService';
 import {
   handleDespesasCommand,
   handleRelatorioCommand,
@@ -17,7 +18,7 @@ import {
   sendCategorias,
   handleClearScreen,
 } from './commands';
-import { MENU_LABELS } from './menu';
+import { buildMenuKeyboard, MENU_LABELS } from './menu';
 
 function buildSummary(draft: {
   amountCents: number;
@@ -124,7 +125,31 @@ export function registerMessageHandlers(bot: Bot) {
     if (!telegramId) return;
     const telegramIdStr = String(telegramId);
 
-    const { session } = await getSessionByTelegramId(telegramIdStr);
+    const sessionData = await getSessionByTelegramId(telegramIdStr);
+    const { session, user } = sessionData;
+
+    const resetMatch = text.trim().match(/^RESET\s+(.+)$/i);
+    if (resetMatch) {
+      const token = resetMatch[1]?.trim() || '';
+      if (!token) {
+        await ctx.reply('Token invalido. Envie /reset_total para gerar um novo codigo.');
+        return;
+      }
+
+      const result = await confirmAndExecuteReset(user.id, token);
+      if (!result.ok) {
+        await ctx.reply('Token invalido ou expirado. Envie /reset_total para gerar um novo.', {
+          reply_markup: buildMenuKeyboard(),
+        });
+      } else {
+        console.info(`reset_total executed for telegramId=${telegramIdStr}`);
+        await ctx.reply('✅ Reset concluido. Seu historico foi apagado.', {
+          reply_markup: buildMenuKeyboard(),
+        });
+      }
+      return;
+    }
+
     if (session?.mode === 'confirm:delete' && session.draftId) {
       const expected = `APAGAR ${session.draftId.split('-')[1]}/${session.draftId.split('-')[0]}`;
       const normalized = text.trim().toUpperCase();

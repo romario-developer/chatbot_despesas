@@ -95,6 +95,12 @@ curl -H "Authorization: Bearer $TOKEN" \
 - Fluxo: usuario envia mensagem com valor/data/categoria; o bot cria rascunho, permite confirmar/editar/cancelar.
 - Comandos principais: `/start`, `/ajuda`, `/relatorio mes`, `/relatorio MM/AAAA`, `/categorias`, `/editar`, `/remover`.
 
+## Reset total (perigoso)
+- Use `/reset_total` para iniciar. O bot nao apaga nada ainda; gera um token curto, grava na sessao por 5 minutos e responde pedindo o texto `RESET <token>` e um botao inline "Cancelar".
+- Ao receber `RESET <token>`, valida token e expiracao para o proprio `telegram_id`, apaga todas as despesas, rascunhos e categorias em transacao, recria a categoria padrão "Outros" e limpa a sessao.
+- Tokens invalidos ou expirados sao recusados; rode `/reset_total` novamente para um novo desafio. O botao "Cancelar" remove o token sem apagar nada.
+- Nao ha endpoint HTTP para reset e o filtro sempre e por usuario (multiusuario seguro).
+
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.

@@ -6,6 +6,8 @@ import { formatCurrency } from '../utils/money';
 import { formatDate } from '../utils/dates';
 import { buildExpensesListMessage } from './commands';
 import { getMonthlyExpensesPage } from '../services/reportService';
+import { getOrCreateUser } from '../services/userService';
+import { cancelReset } from '../services/resetService';
 
 function buildSummary(draft: {
   amountCents: number;
@@ -27,6 +29,13 @@ export function registerCallbackHandlers(bot: Bot) {
     const telegramIdStr = String(telegramId);
 
     try {
+      if (data === 'reset:cancel') {
+        const user = await getOrCreateUser(telegramIdStr);
+        await cancelReset(user.id);
+        await ctx.editMessageText('Operacao cancelada.');
+        await ctx.answerCallbackQuery({ text: 'Cancelado' });
+        return;
+      }
       if (data.startsWith('exp:confirm:')) {
         const draftId = data.split(':')[2];
         const result = await confirmDraft(draftId, telegramIdStr);

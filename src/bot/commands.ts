@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { amountStringToCents, formatCurrency } from '../utils/money';
 import { formatDate, nowBahia, parseDateFromText, dayjs, TZ } from '../utils/dates';
 import {
@@ -15,6 +15,7 @@ import { ensureDefaultCategory, listCategories } from '../services/categoryServi
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
+import { generateResetToken } from '../services/resetService';
 
 function requireTelegramId(ctx: any) {
   const telegramId = ctx.from?.id;
@@ -35,6 +36,10 @@ function truncate(text: string, max = 35) {
 
 function formatDateShort(date: Date) {
   return dayjs(date).format('DD/MM');
+}
+
+function resetCancelKeyboard() {
+  return new InlineKeyboard().text('Cancelar', 'reset:cancel');
 }
 
 function buildCategoryBlock(
@@ -221,6 +226,24 @@ export async function handleDespesasCommand(ctx: any, opts?: { month?: number; y
     const message = err instanceof Error ? err.message : 'Erro ao listar despesas.';
     await ctx.reply(message);
   }
+}
+
+async function handleResetTotalCommand(ctx: any) {
+  const telegramId = requireTelegramId(ctx);
+  const user = await getOrCreateUser(telegramId);
+  const { token } = await generateResetToken(user.id);
+
+  const lines = [
+    '⚠️ Isso apagara TODAS as suas despesas, rascunhos e categorias.',
+    'Para confirmar, envie exatamente:',
+    `RESET ${token}`,
+    '',
+    'O codigo expira em 5 minutos. Toque em Cancelar se mudou de ideia.',
+  ];
+
+  await ctx.reply(lines.join('\n'), {
+    reply_markup: resetCancelKeyboard(),
+  });
 }
 
 export async function handleClearScreen(ctx: any) {
@@ -429,5 +452,14 @@ export function registerCommandHandlers(bot: Bot) {
         `\nDigite: APAGAR ${match[1].padStart(2, '0')}/${year} para confirmar.`,
       { reply_markup: buildMenuKeyboard() },
     );
+  });
+
+  bot.command('reset_total', async (ctx) => {
+    try {
+      await handleResetTotalCommand(ctx);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao iniciar reset.';
+      await ctx.reply(message, { reply_markup: buildMenuKeyboard() });
+    }
   });
 }

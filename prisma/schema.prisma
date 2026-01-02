@@ -67,5 +67,7 @@ model UserSession {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   mode      String?
   draftId   String?
+  resetToken String?
+  resetTokenExpiresAt DateTime?
   updatedAt DateTime @updatedAt
 }

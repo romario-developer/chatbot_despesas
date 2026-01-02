@@ -6,7 +6,8 @@ export type SessionMode =
   | 'edit:category'
   | 'edit:description'
   | 'edit:date'
-  | 'confirm:delete';
+  | 'confirm:delete'
+  | 'reset:pending';
 
 export async function getSessionByTelegramId(telegramId: string) {
   const user = await getOrCreateUser(telegramId);
@@ -18,8 +19,8 @@ export async function setSession(telegramId: string, mode: SessionMode, draftId:
   const { user } = await getSessionByTelegramId(telegramId);
   await prisma.userSession.upsert({
     where: { userId: user.id },
-    update: { mode, draftId },
-    create: { userId: user.id, mode, draftId },
+    update: { mode, draftId, resetToken: null, resetTokenExpiresAt: null },
+    create: { userId: user.id, mode, draftId, resetToken: null, resetTokenExpiresAt: null },
   });
 }
 
