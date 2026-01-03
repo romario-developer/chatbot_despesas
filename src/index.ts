@@ -20,16 +20,15 @@ const PORT = Number(process.env.PORT) || 3000;
 
 /**
  * Detecta se esta rodando no Render:
- * - Render costuma expor RENDER, RENDER_EXTERNAL_URL e PORT
+ * - Render costuma expor RENDER e PORT
  */
-const IS_RENDER = Boolean(process.env.RENDER_EXTERNAL_URL || process.env.RENDER);
+const IS_RENDER = Boolean(process.env.RENDER);
 
 /**
  * URL base publica para webhook:
- * - No Render: use RENDER_EXTERNAL_URL (recomendado)
- * - Se voce quiser sobrescrever manualmente: defina WEBHOOK_URL
+ * - So tenta registrar se WEBHOOK_URL estiver definida
  */
-const baseUrl = (process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_URL || "").trim();
+const baseUrl = (process.env.WEBHOOK_URL || "").trim();
 
 const bot = createBot(BOT_TOKEN);
 
@@ -37,6 +36,31 @@ const app = express();
 const allowedOrigins = [PWA_ORIGIN];
 if (process.env.NODE_ENV !== "production") {
   allowedOrigins.push("http://localhost:5173");
+}
+
+const MAX_WEBHOOK_ATTEMPTS = 5;
+const WEBHOOK_BASE_DELAY_MS = 500;
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function safeSetWebhookWithRetry(webhookUrl: string) {
+  for (let attempt = 1; attempt <= MAX_WEBHOOK_ATTEMPTS; attempt += 1) {
+    try {
+      await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+      console.log(`[webhook] Registrado em ${webhookUrl} (tentativa ${attempt})`);
+      return;
+    } catch (err) {
+      console.error(`[webhook] Falha ao registrar (tentativa ${attempt}/${MAX_WEBHOOK_ATTEMPTS}):`, err);
+      if (attempt < MAX_WEBHOOK_ATTEMPTS) {
+        const delay = WEBHOOK_BASE_DELAY_MS * 2 ** (attempt - 1);
+        await wait(delay);
+      }
+    }
+  }
+
+  console.error(`[webhook] Não foi possível registrar após ${MAX_WEBHOOK_ATTEMPTS} tentativas. Continuando sem webhook.`);
 }
 
 app.use(
@@ -63,19 +87,16 @@ app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
 });
 
 async function startWebhook() {
-  if (!baseUrl) {
-    throw new Error(
-      "Modo webhook ativo, mas nao encontrei URL base. Defina WEBHOOK_URL ou garanta RENDER_EXTERNAL_URL no Render.",
-    );
-  }
-
   const webhookPath = "/webhook";
-  const webhookUrl = new URL(webhookPath, baseUrl).toString();
+  const webhookUrl = baseUrl ? new URL(webhookPath, baseUrl).toString() : null;
 
   app.post(webhookPath, webhookCallback(bot, "express"));
 
-  await bot.api.setWebhook(webhookUrl);
-  console.log("Webhook registrado em:", webhookUrl);
+  if (webhookUrl) {
+    await safeSetWebhookWithRetry(webhookUrl);
+  } else {
+    console.log("WEBHOOK_URL não definida, pulando registro de webhook.");
+  }
 
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT} (webhook)`);
@@ -94,7 +115,6 @@ async function startPolling() {
 
 startWebhookOrPolling().catch((err) => {
   console.error("Falha ao iniciar aplicacao:", err);
-  process.exit(1);
 });
 
 async function startWebhookOrPolling() {
