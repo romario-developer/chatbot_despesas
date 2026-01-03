@@ -5,6 +5,7 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { getOrCreateUser } from "../../services/userService";
 import { dayjs, TZ } from "../../utils/dates";
+import { AuthedRequest } from "../middleware/auth";
 
 const router = Router();
 
@@ -107,6 +108,26 @@ router.get("/", async (req, res) => {
 
   const items = expenses.map(mapExpense);
   return res.json({ items });
+});
+
+router.get("/:id", async (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "ID invalido" });
+  }
+
+  const sub = req.auth?.sub ?? "admin";
+  const user = await getOrCreateUser(sub);
+  const expense = await prisma.expense.findFirst({
+    where: { id, userId: user.id },
+    include: { category: true },
+  });
+
+  if (!expense) {
+    return res.status(404).json({ error: "Lancamento nao encontrado" });
+  }
+
+  return res.json(mapExpense(expense));
 });
 
 router.post("/", async (req, res) => {
