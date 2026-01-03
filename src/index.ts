@@ -21,12 +21,6 @@ const PORT = Number(process.env.PORT) || 3000;
  */
 const IS_RENDER = Boolean(process.env.RENDER);
 
-/**
- * URL base publica para webhook:
- * - So tenta registrar se WEBHOOK_URL estiver definida
- */
-const baseUrl = (process.env.WEBHOOK_URL || "").trim();
-
 const app = express();
 const allowedOrigins = [PWA_ORIGIN];
 if (process.env.NODE_ENV !== "production") {
@@ -35,9 +29,35 @@ if (process.env.NODE_ENV !== "production") {
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
 const WEBHOOK_BASE_DELAY_MS = 500;
+const WEBHOOK_PATH = "/api/telegram/webhook";
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveWebhookUrl(): string | null {
+  const raw = (process.env.WEBHOOK_URL || "").trim();
+  if (!raw) return null;
+
+  // Suporta o caso em que a variavel foi definida como "WEBHOOK_URL=https://..."
+  const sanitized = raw.replace(/^WEBHOOK_URL=/i, "").trim();
+  if (!sanitized) return null;
+
+  try {
+    const url = new URL(sanitized);
+
+    const endsWithWebhook = url.pathname.endsWith("/webhook");
+    const endsWithExact = url.pathname.endsWith(WEBHOOK_PATH);
+    if (!endsWithExact && !endsWithWebhook) {
+      const basePath = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
+      url.pathname = `${basePath}${WEBHOOK_PATH}`;
+    }
+
+    return url.toString();
+  } catch (err) {
+    console.error("[webhook] WEBHOOK_URL invalida, pulando registro:", err);
+    return null;
+  }
 }
 
 async function safeSetWebhookWithRetry(webhookUrl: string) {
@@ -82,13 +102,12 @@ app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
 });
 
 async function startWebhook() {
-  const webhookPath = "/api/telegram/webhook";
-  const webhookUrl = baseUrl ? new URL(webhookPath, baseUrl).toString() : null;
+  const webhookUrl = resolveWebhookUrl();
 
   if (webhookUrl) {
     await safeSetWebhookWithRetry(webhookUrl);
   } else {
-    console.log("WEBHOOK_URL não definida, pulando registro de webhook.");
+    console.log("WEBHOOK_URL nao definida ou invalida, pulando registro de webhook.");
   }
 
   app.listen(PORT, () => {
