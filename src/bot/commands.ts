@@ -14,11 +14,7 @@ import { getMonthlyExpensesPage, getMonthlyReport, getMonthlyReportByUserId } fr
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
-import {
-  consumeLinkCode,
-  findUserIdByChatId,
-  linkChatToUser,
-} from '../services/telegramLinkService';
+import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
@@ -69,10 +65,10 @@ function requireTelegramId(ctx: any) {
   return String(telegramId);
 }
 
-async function resolveUserIdFromTelegram(ctx: any) {
+async function requireLinkedUserId(ctx: any) {
   const chatId = ctx.chat?.id ?? ctx.from?.id;
   if (!chatId) {
-    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', {
+    await ctx.reply('Nao consegui identificar o chat deste Telegram.', {
       reply_markup: buildMenuKeyboard(),
     });
     return null;
@@ -80,7 +76,7 @@ async function resolveUserIdFromTelegram(ctx: any) {
   const userId = await findUserIdByChatId(String(chatId));
   if (!userId) {
     await ctx.reply(
-      'Vocˆ precisa vincular sua conta. No app/PWA, gere um c¢digo em "Conectar Telegram" e envie: /link SEU_CODIGO',
+      'Voce precisa vincular sua conta. No app, toque em "Conectar Telegram" e envie aqui: /link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return null;
@@ -333,7 +329,7 @@ export async function handleClearScreen(ctx: any) {
 }
 
 async function handleSalarioCommand(ctx: any) {
-  const userId = await resolveUserIdFromTelegram(ctx);
+  const userId = await requireLinkedUserId(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
@@ -361,7 +357,7 @@ async function handleSalarioCommand(ctx: any) {
 }
 
 async function handleExtraCommand(ctx: any) {
-  const userId = await resolveUserIdFromTelegram(ctx);
+  const userId = await requireLinkedUserId(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
@@ -394,7 +390,7 @@ async function handleExtraCommand(ctx: any) {
 }
 
 async function handleFixaCommand(ctx: any) {
-  const userId = await resolveUserIdFromTelegram(ctx);
+  const userId = await requireLinkedUserId(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const amountArg = args[0];
@@ -421,7 +417,7 @@ async function handleFixaCommand(ctx: any) {
 }
 
 async function handlePlanejamentoCommand(ctx: any) {
-  const userId = await resolveUserIdFromTelegram(ctx);
+  const userId = await requireLinkedUserId(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
@@ -474,27 +470,33 @@ async function handleLinkCommand(ctx: any) {
   const chatId = ctx.chat?.id ?? ctx.from?.id;
   const code = (ctx.match as string | undefined)?.trim();
   if (!chatId) {
-    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    await ctx.reply('Nao consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
     return;
   }
   if (!code) {
     await ctx.reply(
-      'Gere um c¢digo no app/PWA em "Conectar Telegram" e envie: /link SEU_CODIGO',
+      'No app, toque em "Conectar Telegram" e envie aqui: /link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return;
   }
 
-  const consumed = await consumeLinkCode(code);
-  if (!consumed) {
-    await ctx.reply('C¢digo inv lido ou expirado. Gere um novo no app/PWA.', {
+  const result = await consumeLinkCode(String(chatId), code);
+  if (!result.ok) {
+    if (result.reason === 'chat_already_linked') {
+      await ctx.reply(
+        'Este chat ja esta vinculado a outra conta. Desvincule no app antes de tentar novamente.',
+        { reply_markup: buildMenuKeyboard() },
+      );
+      return;
+    }
+    await ctx.reply('Codigo invalido ou expirado. Gere outro codigo no app e tente novamente.', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
   }
 
-  await linkChatToUser(consumed.userId, String(chatId));
-  await ctx.reply('Telegram vinculado com sucesso. Agora seu planejamento ser  sincronizado.', {
+  await ctx.reply('Conta vinculada com sucesso. Agora seu planejamento sera sincronizado.', {
     reply_markup: buildMenuKeyboard(),
   });
 }
