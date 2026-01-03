@@ -10,6 +10,9 @@ import { createLinkCode, getLinkStatus } from '../../services/telegramLinkServic
 const router = Router();
 
 router.post('/webhook', webhookCallback(bot, 'express'));
+router.get('/status', (_req, res) => {
+  res.json({ ok: true });
+});
 
 const authed = Router();
 authed.use(authMiddleware, noCacheMiddleware);
