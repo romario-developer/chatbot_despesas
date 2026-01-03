@@ -447,7 +447,7 @@ async function handlePlanejamentoCommand(ctx: any) {
   const extras = extrasList.reduce((sum, item) => sum + item.amount, 0);
   const fixas = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
   const summary = await getSummaryByUserIdAndMonth(userId, month.key);
-  const gastos = summary.total ?? 0;
+  const gastos = Number(summary.total) || 0;
   const receita = salary + extras;
   const saldo = receita - gastos;
   const saldoPrevisto = receita - gastos - fixas;
