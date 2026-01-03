@@ -10,12 +10,14 @@ datasource db {
 model User {
   id          Int            @id @default(autoincrement())
   telegramId  String         @unique
+  telegramChatId String?     @unique
   createdAt   DateTime       @default(now())
   categories  Category[]
   expenses    Expense[]
   drafts      ExpenseDraft[]
   session     UserSession?
   planning    Planning?
+  linkCodes   TelegramLinkCode[]
 }
 
 model Category {
@@ -80,4 +82,14 @@ model Planning {
   data      Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model TelegramLinkCode {
+  code      String   @id
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }

@@ -10,10 +10,15 @@ import {
   updateExpenseDate,
   updateExpenseDescription,
 } from '../services/expenseService';
-import { getMonthlyExpensesPage, getMonthlyReport } from '../services/reportService';
+import { getMonthlyExpensesPage, getMonthlyReport, getMonthlyReportByUserId } from '../services/reportService';
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
+import {
+  consumeLinkCode,
+  findUserIdByChatId,
+  linkChatToUser,
+} from '../services/telegramLinkService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
@@ -62,6 +67,25 @@ function requireTelegramId(ctx: any) {
     throw new Error('Não consegui identificar o usuário do Telegram.');
   }
   return String(telegramId);
+}
+
+async function resolveUserIdFromTelegram(ctx: any) {
+  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  if (!chatId) {
+    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return null;
+  }
+  const userId = await findUserIdByChatId(String(chatId));
+  if (!userId) {
+    await ctx.reply(
+      'Vocˆ precisa vincular sua conta. No app/PWA, gere um c¢digo em "Conectar Telegram" e envie: /link SEU_CODIGO',
+      { reply_markup: buildMenuKeyboard() },
+    );
+    return null;
+  }
+  return userId;
 }
 
 function escapeHtml(text: string) {
@@ -309,7 +333,8 @@ export async function handleClearScreen(ctx: any) {
 }
 
 async function handleSalarioCommand(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
+  const userId = await resolveUserIdFromTelegram(ctx);
+  if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
   const amountArg = args[1];
@@ -324,12 +349,11 @@ async function handleSalarioCommand(ctx: any) {
     return;
   }
 
-  const user = await getOrCreateUser(telegramId);
-  const planning = await getPlanningByUserId(user.id);
+  const planning = await getPlanningByUserId(userId);
   const salaryByMonth = { ...planning.salaryByMonth, [month.key]: amount };
   const updated = { ...planning, salaryByMonth };
 
-  await upsertPlanning(user.id, updated);
+  await upsertPlanning(userId, updated);
 
   await ctx.reply(`Sal rio de ${month.key} definido para ${formatBRL(amount)}`, {
     reply_markup: buildMenuKeyboard(),
@@ -337,7 +361,8 @@ async function handleSalarioCommand(ctx: any) {
 }
 
 async function handleExtraCommand(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
+  const userId = await resolveUserIdFromTelegram(ctx);
+  if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
   const amountArg = args[1];
@@ -353,14 +378,13 @@ async function handleExtraCommand(ctx: any) {
     return;
   }
 
-  const user = await getOrCreateUser(telegramId);
-  const planning = await getPlanningByUserId(user.id);
+  const planning = await getPlanningByUserId(userId);
   const monthExtras = [...(planning.extrasByMonth[month.key] ?? [])];
   monthExtras.push({ id: generateId(), label: label || undefined, amount });
   const extrasByMonth = { ...planning.extrasByMonth, [month.key]: monthExtras };
   const updated = { ...planning, extrasByMonth };
 
-  await upsertPlanning(user.id, updated);
+  await upsertPlanning(userId, updated);
 
   const totalExtras = monthExtras.reduce((sum, item) => sum + item.amount, 0);
   await ctx.reply(
@@ -370,7 +394,8 @@ async function handleExtraCommand(ctx: any) {
 }
 
 async function handleFixaCommand(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
+  const userId = await resolveUserIdFromTelegram(ctx);
+  if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const amountArg = args[0];
   const label = args.slice(1).join(' ').trim();
@@ -383,12 +408,11 @@ async function handleFixaCommand(ctx: any) {
     return;
   }
 
-  const user = await getOrCreateUser(telegramId);
-  const planning = await getPlanningByUserId(user.id);
+  const planning = await getPlanningByUserId(userId);
   const fixedBills = [...planning.fixedBills, { id: generateId(), label: label || undefined, amount }];
   const updated = { ...planning, fixedBills };
 
-  await upsertPlanning(user.id, updated);
+  await upsertPlanning(userId, updated);
 
   const totalFixas = fixedBills.reduce((sum, item) => sum + item.amount, 0);
   await ctx.reply(`Conta fixa adicionada. Total de fixas: ${formatBRL(totalFixas)}`, {
@@ -397,7 +421,8 @@ async function handleFixaCommand(ctx: any) {
 }
 
 async function handlePlanejamentoCommand(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
+  const userId = await resolveUserIdFromTelegram(ctx);
+  if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
 
@@ -418,8 +443,7 @@ async function handlePlanejamentoCommand(ctx: any) {
     };
   }
 
-  const user = await getOrCreateUser(telegramId);
-  const planning = await getPlanningByUserId(user.id);
+  const planning = await getPlanningByUserId(userId);
 
   const salary = planning.salaryByMonth[month.key] ?? 0;
   const extrasList = planning.extrasByMonth[month.key] ?? [];
@@ -427,7 +451,7 @@ async function handlePlanejamentoCommand(ctx: any) {
   const receita = salary + extras;
   const fixas = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
 
-  const report = await getMonthlyReport(telegramId, month.month, month.year);
+  const report = await getMonthlyReportByUserId(userId, month.month, month.year);
   const gastos = (report.totalCents ?? 0) / 100;
   const saldo = receita - gastos;
   const saldoPrevisto = receita - gastos - fixas;
@@ -444,6 +468,53 @@ async function handlePlanejamentoCommand(ctx: any) {
   ];
 
   await ctx.reply(lines.join('\n'), { reply_markup: buildMenuKeyboard() });
+}
+
+async function handleLinkCommand(ctx: any) {
+  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  const code = (ctx.match as string | undefined)?.trim();
+  if (!chatId) {
+    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    return;
+  }
+  if (!code) {
+    await ctx.reply(
+      'Gere um c¢digo no app/PWA em "Conectar Telegram" e envie: /link SEU_CODIGO',
+      { reply_markup: buildMenuKeyboard() },
+    );
+    return;
+  }
+
+  const consumed = await consumeLinkCode(code);
+  if (!consumed) {
+    await ctx.reply('C¢digo inv lido ou expirado. Gere um novo no app/PWA.', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return;
+  }
+
+  await linkChatToUser(consumed.userId, String(chatId));
+  await ctx.reply('Telegram vinculado com sucesso. Agora seu planejamento ser  sincronizado.', {
+    reply_markup: buildMenuKeyboard(),
+  });
+}
+
+async function handleMeCommand(ctx: any) {
+  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  if (!chatId) {
+    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    return;
+  }
+  const userId = await findUserIdByChatId(String(chatId));
+  if (!userId) {
+    await ctx.reply(
+      'Este chat nÆo est  vinculado. No app/PWA, gere um c¢digo e envie: /link SEU_CODIGO',
+      { reply_markup: buildMenuKeyboard() },
+    );
+    return;
+  }
+
+  await ctx.reply(`Chat vinculado ao usu rio #${userId}.`, { reply_markup: buildMenuKeyboard() });
 }
 
 export function registerCommandHandlers(bot: Bot) {
@@ -669,6 +740,22 @@ export function registerCommandHandlers(bot: Bot) {
       await handlePlanejamentoCommand(ctx);
     } catch {
       await ctx.reply('Erro ao carregar planejamento. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('link', async (ctx) => {
+    try {
+      await handleLinkCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao vincular Telegram. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('me', async (ctx) => {
+    try {
+      await handleMeCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao consultar vincula‡Æo.', { reply_markup: buildMenuKeyboard() });
     }
   });
 }

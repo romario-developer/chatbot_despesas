@@ -7,6 +7,7 @@ import categoriesRoutes from './routes/categories';
 import entriesRoutes from './routes/entries';
 import planningRoutes from './routes/planning';
 import summaryRoutes from './routes/summary';
+import telegramRoutes from './routes/telegram';
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use('/entries', entriesRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/summary', summaryRoutes);
 router.use('/planning', planningRoutes);
+router.use('/telegram', telegramRoutes);
 
 export default router;
