@@ -1,25 +1,29 @@
 import { Router } from 'express';
 
 import { AuthedRequest } from '../middleware/auth';
-import { getOrCreateUser } from '../../services/userService';
 import { getSummaryByUserIdAndMonth } from '../../services/summaryService';
 
 const router = Router();
-const API_TELEGRAM_ID = 'api-admin';
 
 router.get('/', async (req: AuthedRequest, res) => {
   const { month } = req.query;
 
   if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ error: 'Parâmetro "month" é obrigatório no formato YYYY-MM' });
+    return res.status(400).json({ error: 'Parametro "month" e obrigatorio no formato YYYY-MM' });
   }
 
-  const sub = req.auth?.sub ?? 'admin';
-  const telegramId = sub === 'admin' ? API_TELEGRAM_ID : sub;
-  const user = await getOrCreateUser(telegramId);
+  const userId = req.auth?.sub;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const numericUserId = Number(userId);
+  if (!Number.isInteger(numericUserId) || numericUserId <= 0) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 
   try {
-    const summary = await getSummaryByUserIdAndMonth(user.id, month);
+    const summary = await getSummaryByUserIdAndMonth(numericUserId, month);
     return res.json(summary);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo.';
