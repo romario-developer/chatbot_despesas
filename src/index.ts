@@ -2,17 +2,14 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
-import { webhookCallback } from "grammy";
 
 import apiRouter from "./api";
-import { createBot } from "./bot/bot";
+import { bot } from "./bot/botInstance";
 import "./utils/dates";
 
 dotenv.config();
 process.env.TZ = "America/Fortaleza";
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) throw new Error("Defina BOT_TOKEN nas variaveis de ambiente");
 const PWA_ORIGIN = process.env.PWA_ORIGIN;
 if (!PWA_ORIGIN) throw new Error("Defina PWA_ORIGIN nas variaveis de ambiente");
 
@@ -29,8 +26,6 @@ const IS_RENDER = Boolean(process.env.RENDER);
  * - So tenta registrar se WEBHOOK_URL estiver definida
  */
 const baseUrl = (process.env.WEBHOOK_URL || "").trim();
-
-const bot = createBot(BOT_TOKEN);
 
 const app = express();
 const allowedOrigins = [PWA_ORIGIN];
@@ -87,10 +82,8 @@ app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
 });
 
 async function startWebhook() {
-  const webhookPath = "/webhook";
+  const webhookPath = "/api/telegram/webhook";
   const webhookUrl = baseUrl ? new URL(webhookPath, baseUrl).toString() : null;
-
-  app.post(webhookPath, webhookCallback(bot, "express"));
 
   if (webhookUrl) {
     await safeSetWebhookWithRetry(webhookUrl);

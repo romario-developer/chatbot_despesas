@@ -12,6 +12,7 @@ import telegramRoutes from './routes/telegram';
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/telegram', telegramRoutes);
 
 router.use(authMiddleware);
 router.use(noCacheMiddleware);
@@ -19,6 +20,5 @@ router.use('/entries', entriesRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/summary', summaryRoutes);
 router.use('/planning', planningRoutes);
-router.use('/telegram', telegramRoutes);
 
 export default router;
