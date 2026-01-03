@@ -67,6 +67,7 @@ router.get("/", async (req, res) => {
   const { from, to, category, q } = req.query;
 
   const filters: Prisma.ExpenseWhereInput[] = [];
+  filters.push({ source: { not: "manual" } });
 
   const fromDate = from ? parseDateOnly(from) : null;
   if (from && !fromDate) {

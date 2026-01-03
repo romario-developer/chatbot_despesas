@@ -26,6 +26,7 @@ router.get('/', async (req, res) => {
 
   const expenses = await prisma.expense.findMany({
     where: {
+      source: { not: 'manual' },
       date: {
         gte: start.toDate(),
         lte: end.toDate(),
