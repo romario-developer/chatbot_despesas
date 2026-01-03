@@ -10,11 +10,12 @@ import {
   updateExpenseDate,
   updateExpenseDescription,
 } from '../services/expenseService';
-import { getMonthlyExpensesPage, getMonthlyReport, getMonthlyReportByUserId } from '../services/reportService';
+import { getMonthlyExpensesPage, getMonthlyReport } from '../services/reportService';
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
+import { getSummaryByUserIdAndMonth } from '../services/summaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
@@ -66,9 +67,9 @@ function requireTelegramId(ctx: any) {
 }
 
 async function requireLinkedUserId(ctx: any) {
-  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  const chatId = ctx.chat?.id;
   if (!chatId) {
-    await ctx.reply('Nao consegui identificar o chat deste Telegram.', {
+    await ctx.reply('Não consegui identificar o chat deste Telegram.', {
       reply_markup: buildMenuKeyboard(),
     });
     return null;
@@ -76,7 +77,7 @@ async function requireLinkedUserId(ctx: any) {
   const userId = await findUserIdByChatId(String(chatId));
   if (!userId) {
     await ctx.reply(
-      'Voce precisa vincular sua conta. No app, toque em "Conectar Telegram" e envie aqui: /link SEU_CODIGO',
+      'Você precisa vincular sua conta.\nNo app, toque em "Conectar Telegram" e envie aqui:\n/link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return null;
@@ -297,7 +298,7 @@ async function handleResetTotalCommand(ctx: any) {
     'Para confirmar, envie exatamente:',
     `RESET ${token}`,
     '',
-    'O codigo expira em 5 minutos. Toque em Cancelar se mudou de ideia.',
+    'O código expira em 5 minutos. Toque em Cancelar se mudou de ideia.',
   ];
 
   await ctx.reply(lines.join('\n'), {
@@ -351,7 +352,7 @@ async function handleSalarioCommand(ctx: any) {
 
   await upsertPlanning(userId, updated);
 
-  await ctx.reply(`Sal rio de ${month.key} definido para ${formatBRL(amount)}`, {
+  await ctx.reply(`Salário de ${month.key} definido para ${formatBRL(amount)}`, {
     reply_markup: buildMenuKeyboard(),
   });
 }
@@ -368,7 +369,7 @@ async function handleExtraCommand(ctx: any) {
   const amount = parseAmountNumber(amountArg);
 
   if (!month || amount === null || amount <= 0) {
-    await ctx.reply('Use: /extra YYYY-MM valor descri‡Æo(opcional). Ex: /extra 2026-01 250 freela', {
+    await ctx.reply('Use: /extra YYYY-MM valor descrição(opcional). Ex: /extra 2026-01 250 freela', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
@@ -398,7 +399,7 @@ async function handleFixaCommand(ctx: any) {
 
   const amount = parseAmountNumber(amountArg);
   if (amount === null || amount <= 0) {
-    await ctx.reply('Use: /fixa valor descri‡Æo(opcional). Ex: /fixa 120 internet', {
+    await ctx.reply('Use: /fixa valor descrição(opcional). Ex: /fixa 120 internet', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
@@ -444,21 +445,20 @@ async function handlePlanejamentoCommand(ctx: any) {
   const salary = planning.salaryByMonth[month.key] ?? 0;
   const extrasList = planning.extrasByMonth[month.key] ?? [];
   const extras = extrasList.reduce((sum, item) => sum + item.amount, 0);
-  const receita = salary + extras;
   const fixas = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
-
-  const report = await getMonthlyReportByUserId(userId, month.month, month.year);
-  const gastos = (report.totalCents ?? 0) / 100;
+  const summary = await getSummaryByUserIdAndMonth(userId, month.key);
+  const gastos = summary.total ?? 0;
+  const receita = salary + extras;
   const saldo = receita - gastos;
   const saldoPrevisto = receita - gastos - fixas;
 
   const lines = [
     `📅 Planejamento ${month.key}`,
     `Receita: ${formatBRL(receita)}`,
-    `- Sal rio: ${formatBRL(salary)}`,
+    `- Salário: ${formatBRL(salary)}`,
     `- Extras: ${formatBRL(extras)}`,
     `Fixas: ${formatBRL(fixas)}`,
-    `Gastos do mˆs: ${formatBRL(gastos)}`,
+    `Gastos do mês: ${formatBRL(gastos)}`,
     `Saldo: ${formatBRL(saldo)}`,
     `Saldo previsto: ${formatBRL(saldoPrevisto)}`,
   ];
@@ -467,10 +467,10 @@ async function handlePlanejamentoCommand(ctx: any) {
 }
 
 async function handleLinkCommand(ctx: any) {
-  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  const chatId = ctx.chat?.id;
   const code = (ctx.match as string | undefined)?.trim();
   if (!chatId) {
-    await ctx.reply('Nao consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    await ctx.reply('Não consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
     return;
   }
   if (!code) {
@@ -485,38 +485,38 @@ async function handleLinkCommand(ctx: any) {
   if (!result.ok) {
     if (result.reason === 'chat_already_linked') {
       await ctx.reply(
-        'Este chat ja esta vinculado a outra conta. Desvincule no app antes de tentar novamente.',
+        'Este chat já está vinculado a outra conta. Desvincule no app antes de tentar novamente.',
         { reply_markup: buildMenuKeyboard() },
       );
       return;
     }
-    await ctx.reply('Codigo invalido ou expirado. Gere outro codigo no app e tente novamente.', {
+    await ctx.reply('Código inválido ou expirado. Gere outro código no app e tente novamente.', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
   }
 
-  await ctx.reply('Conta vinculada com sucesso. Agora seu planejamento sera sincronizado.', {
+  await ctx.reply('Conta vinculada com sucesso. Agora seu planejamento será sincronizado.', {
     reply_markup: buildMenuKeyboard(),
   });
 }
 
 async function handleMeCommand(ctx: any) {
-  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  const chatId = ctx.chat?.id;
   if (!chatId) {
-    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    await ctx.reply('Não consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
     return;
   }
   const userId = await findUserIdByChatId(String(chatId));
   if (!userId) {
     await ctx.reply(
-      'Este chat nÆo est  vinculado. No app/PWA, gere um c¢digo e envie: /link SEU_CODIGO',
+      'Este chat não está vinculado. No app/PWA, gere um código e envie: /link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return;
   }
 
-  await ctx.reply(`Chat vinculado ao usu rio #${userId}.`, { reply_markup: buildMenuKeyboard() });
+  await ctx.reply(`Chat vinculado ao usuário #${userId}.`, { reply_markup: buildMenuKeyboard() });
 }
 
 export function registerCommandHandlers(bot: Bot) {
@@ -717,7 +717,7 @@ export function registerCommandHandlers(bot: Bot) {
     try {
       await handleSalarioCommand(ctx);
     } catch {
-      await ctx.reply('Erro ao salvar sal rio. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Erro ao salvar salário. Tente novamente.', { reply_markup: buildMenuKeyboard() });
     }
   });
 
@@ -757,7 +757,7 @@ export function registerCommandHandlers(bot: Bot) {
     try {
       await handleMeCommand(ctx);
     } catch {
-      await ctx.reply('Erro ao consultar vincula‡Æo.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Erro ao consultar vinculação.', { reply_markup: buildMenuKeyboard() });
     }
   });
 }
