@@ -15,6 +15,7 @@ model User {
   expenses    Expense[]
   drafts      ExpenseDraft[]
   session     UserSession?
+  planning    Planning?
 }
 
 model Category {
@@ -69,5 +70,14 @@ model UserSession {
   draftId   String?
   resetToken String?
   resetTokenExpiresAt DateTime?
+  updatedAt DateTime @updatedAt
+}
+
+model Planning {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
