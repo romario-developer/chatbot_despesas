@@ -1,5 +1,6 @@
+import { randomUUID } from 'crypto';
 import { Bot, InlineKeyboard } from 'grammy';
-import { amountStringToCents, formatCurrency } from '../utils/money';
+import { amountStringToCents, formatCurrency, formatCurrencyNumber } from '../utils/money';
 import { formatDate, nowBahia, parseDateFromText, dayjs, TZ } from '../utils/dates';
 import {
   deleteExpense,
@@ -12,10 +13,48 @@ import {
 import { getMonthlyExpensesPage, getMonthlyReport } from '../services/reportService';
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
+import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
 import { generateResetToken } from '../services/resetService';
+
+function parseMonthArg(raw?: string) {
+  if (!raw) return null;
+  const value = raw.trim();
+  if (!/^\d{4}-\d{2}$/.test(value)) return null;
+  const [yearStr, monthStr] = value.split('-');
+  const year = Number.parseInt(yearStr, 10);
+  const month = Number.parseInt(monthStr, 10);
+  if (!year || month < 1 || month > 12) return null;
+  return { year, month, key: `${yearStr}-${monthStr}` };
+}
+
+function parseAmountNumber(raw?: string) {
+  if (!raw) return null;
+  const cleaned = raw.toLowerCase().replace(/r\$\s*/g, '').replace(/\s+/g, '').trim();
+  if (!cleaned) return null;
+  let normalized = cleaned;
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
+  if (hasComma && hasDot) {
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else if (hasComma) {
+    normalized = normalized.replace(',', '.');
+  }
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Number(parsed.toFixed(2));
+}
+
+function generateId() {
+  if (typeof randomUUID === 'function') return randomUUID();
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatBRL(amount: number) {
+  return formatCurrencyNumber(amount);
+}
 
 function requireTelegramId(ctx: any) {
   const telegramId = ctx.from?.id;
@@ -269,6 +308,144 @@ export async function handleClearScreen(ctx: any) {
   await ctx.reply('Tela limpa. Seus registros continuam salvos.', { reply_markup: buildMenuKeyboard() });
 }
 
+async function handleSalarioCommand(ctx: any) {
+  const telegramId = requireTelegramId(ctx);
+  const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const monthArg = args[0];
+  const amountArg = args[1];
+
+  const month = parseMonthArg(monthArg);
+  const amount = parseAmountNumber(amountArg);
+
+  if (!month || amount === null || amount <= 0) {
+    await ctx.reply('Use: /salario YYYY-MM valor. Ex: /salario 2026-01 3500', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return;
+  }
+
+  const user = await getOrCreateUser(telegramId);
+  const planning = await getPlanningByUserId(user.id);
+  const salaryByMonth = { ...planning.salaryByMonth, [month.key]: amount };
+  const updated = { ...planning, salaryByMonth };
+
+  await upsertPlanning(user.id, updated);
+
+  await ctx.reply(`Sal rio de ${month.key} definido para ${formatBRL(amount)}`, {
+    reply_markup: buildMenuKeyboard(),
+  });
+}
+
+async function handleExtraCommand(ctx: any) {
+  const telegramId = requireTelegramId(ctx);
+  const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const monthArg = args[0];
+  const amountArg = args[1];
+  const label = args.slice(2).join(' ').trim();
+
+  const month = parseMonthArg(monthArg);
+  const amount = parseAmountNumber(amountArg);
+
+  if (!month || amount === null || amount <= 0) {
+    await ctx.reply('Use: /extra YYYY-MM valor descri‡Æo(opcional). Ex: /extra 2026-01 250 freela', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return;
+  }
+
+  const user = await getOrCreateUser(telegramId);
+  const planning = await getPlanningByUserId(user.id);
+  const monthExtras = [...(planning.extrasByMonth[month.key] ?? [])];
+  monthExtras.push({ id: generateId(), label: label || undefined, amount });
+  const extrasByMonth = { ...planning.extrasByMonth, [month.key]: monthExtras };
+  const updated = { ...planning, extrasByMonth };
+
+  await upsertPlanning(user.id, updated);
+
+  const totalExtras = monthExtras.reduce((sum, item) => sum + item.amount, 0);
+  await ctx.reply(
+    `Extra adicionado. Total de extras em ${month.key}: ${formatBRL(totalExtras)}`,
+    { reply_markup: buildMenuKeyboard() },
+  );
+}
+
+async function handleFixaCommand(ctx: any) {
+  const telegramId = requireTelegramId(ctx);
+  const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const amountArg = args[0];
+  const label = args.slice(1).join(' ').trim();
+
+  const amount = parseAmountNumber(amountArg);
+  if (amount === null || amount <= 0) {
+    await ctx.reply('Use: /fixa valor descri‡Æo(opcional). Ex: /fixa 120 internet', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return;
+  }
+
+  const user = await getOrCreateUser(telegramId);
+  const planning = await getPlanningByUserId(user.id);
+  const fixedBills = [...planning.fixedBills, { id: generateId(), label: label || undefined, amount }];
+  const updated = { ...planning, fixedBills };
+
+  await upsertPlanning(user.id, updated);
+
+  const totalFixas = fixedBills.reduce((sum, item) => sum + item.amount, 0);
+  await ctx.reply(`Conta fixa adicionada. Total de fixas: ${formatBRL(totalFixas)}`, {
+    reply_markup: buildMenuKeyboard(),
+  });
+}
+
+async function handlePlanejamentoCommand(ctx: any) {
+  const telegramId = requireTelegramId(ctx);
+  const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const maybeMonth = args[0];
+
+  let month = maybeMonth ? parseMonthArg(maybeMonth) : null;
+  if (maybeMonth && !month) {
+    await ctx.reply('Use: /planejamento YYYY-MM. Ex: /planejamento 2026-01', {
+      reply_markup: buildMenuKeyboard(),
+    });
+    return;
+  }
+
+  if (!month) {
+    const now = nowBahia();
+    month = {
+      year: now.year(),
+      month: now.month() + 1,
+      key: `${now.year()}-${String(now.month() + 1).padStart(2, '0')}`,
+    };
+  }
+
+  const user = await getOrCreateUser(telegramId);
+  const planning = await getPlanningByUserId(user.id);
+
+  const salary = planning.salaryByMonth[month.key] ?? 0;
+  const extrasList = planning.extrasByMonth[month.key] ?? [];
+  const extras = extrasList.reduce((sum, item) => sum + item.amount, 0);
+  const receita = salary + extras;
+  const fixas = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
+
+  const report = await getMonthlyReport(telegramId, month.month, month.year);
+  const gastos = (report.totalCents ?? 0) / 100;
+  const saldo = receita - gastos;
+  const saldoPrevisto = receita - gastos - fixas;
+
+  const lines = [
+    `📅 Planejamento ${month.key}`,
+    `Receita: ${formatBRL(receita)}`,
+    `- Sal rio: ${formatBRL(salary)}`,
+    `- Extras: ${formatBRL(extras)}`,
+    `Fixas: ${formatBRL(fixas)}`,
+    `Gastos do mˆs: ${formatBRL(gastos)}`,
+    `Saldo: ${formatBRL(saldo)}`,
+    `Saldo previsto: ${formatBRL(saldoPrevisto)}`,
+  ];
+
+  await ctx.reply(lines.join('\n'), { reply_markup: buildMenuKeyboard() });
+}
+
 export function registerCommandHandlers(bot: Bot) {
   bot.command('start', async (ctx) => {
     const telegramId = requireTelegramId(ctx);
@@ -460,6 +637,38 @@ export function registerCommandHandlers(bot: Bot) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao iniciar reset.';
       await ctx.reply(message, { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('salario', async (ctx) => {
+    try {
+      await handleSalarioCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao salvar sal rio. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('extra', async (ctx) => {
+    try {
+      await handleExtraCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao salvar extra. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('fixa', async (ctx) => {
+    try {
+      await handleFixaCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao salvar conta fixa. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+    }
+  });
+
+  bot.command('planejamento', async (ctx) => {
+    try {
+      await handlePlanejamentoCommand(ctx);
+    } catch {
+      await ctx.reply('Erro ao carregar planejamento. Tente novamente.', { reply_markup: buildMenuKeyboard() });
     }
   });
 }
