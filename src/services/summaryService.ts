@@ -44,6 +44,8 @@ export async function getSummaryByUserIdAndMonth(userId: number, month: string) 
     totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + expense.amountCents);
   }
 
+  debugSummary({ userId, month, from: start.toDate(), to: end.toDate(), count: expenses.length });
+
   return {
     month,
     total: centsToNumber(totalCents),
@@ -56,4 +58,13 @@ export async function getSummaryByUserIdAndMonth(userId: number, month: string) 
       total: centsToNumber(cents),
     })),
   };
+}
+
+// Log de apoio em desenvolvimento
+function debugSummary(params: { userId: number; month: string; from: Date; to: Date; count: number }) {
+  if (process.env.NODE_ENV === 'production') return;
+  // eslint-disable-next-line no-console
+  console.debug(
+    `[summary] userId=${params.userId} month=${params.month} from=${params.from.toISOString()} to=${params.to.toISOString()} count=${params.count}`,
+  );
 }

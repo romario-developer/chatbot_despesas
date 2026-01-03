@@ -5,6 +5,7 @@ import { getOrCreateUser } from '../../services/userService';
 import { getSummaryByUserIdAndMonth } from '../../services/summaryService';
 
 const router = Router();
+const API_TELEGRAM_ID = 'api-admin';
 
 router.get('/', async (req: AuthedRequest, res) => {
   const { month } = req.query;
@@ -14,7 +15,8 @@ router.get('/', async (req: AuthedRequest, res) => {
   }
 
   const sub = req.auth?.sub ?? 'admin';
-  const user = await getOrCreateUser(sub);
+  const telegramId = sub === 'admin' ? API_TELEGRAM_ID : sub;
+  const user = await getOrCreateUser(telegramId);
 
   try {
     const summary = await getSummaryByUserIdAndMonth(user.id, month);
