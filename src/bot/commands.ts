@@ -10,11 +10,12 @@ import {
   updateExpenseDate,
   updateExpenseDescription,
 } from '../services/expenseService';
-import { getMonthlyExpensesPage, getMonthlyReport, getMonthlyReportByUserId } from '../services/reportService';
+import { getMonthlyExpensesPage, getMonthlyReport } from '../services/reportService';
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
+import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
@@ -439,24 +440,19 @@ async function handlePlanejamentoCommand(ctx: any) {
     };
   }
 
-  const planning = await getPlanningByUserId(userId);
+  const summary = await getMonthlySummaryByUserId({ userId, month: month.key });
 
-  const salary = planning.salaryByMonth[month.key] ?? 0;
-  const extrasList = planning.extrasByMonth[month.key] ?? [];
-  const extras = extrasList.reduce((sum, item) => sum + item.amount, 0);
-  const receita = salary + extras;
-  const fixas = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
-
-  const report = await getMonthlyReportByUserId(userId, month.month, month.year);
-  const gastos = (report.totalCents ?? 0) / 100;
-  const saldo = receita - gastos;
-  const saldoPrevisto = receita - gastos - fixas;
+  const receita = summary.salaryTotal + summary.extrasTotal;
+  const fixas = summary.fixedPlannedTotal;
+  const gastos = summary.total;
+  const saldo = summary.balance;
+  const saldoPrevisto = summary.forecastBalance;
 
   const message = [
     `📅 Planejamento ${month.key}`,
     `Receita: ${formatBRL(receita)}`,
-    `- Salário: ${formatBRL(salary)}`,
-    `- Extras: ${formatBRL(extras)}`,
+    `- Salário: ${formatBRL(summary.salaryTotal)}`,
+    `- Extras: ${formatBRL(summary.extrasTotal)}`,
     `Fixas: ${formatBRL(fixas)}`,
     `Gastos do mês: ${formatBRL(gastos)}`,
     `Saldo: ${formatBRL(saldo)}`,
@@ -464,6 +460,15 @@ async function handlePlanejamentoCommand(ctx: any) {
   ].join('\n');
 
   if (process.env.NODE_ENV !== 'production') {
+    console.log('[telegram][planejamento] summary:', {
+      month: month.key,
+      salary: summary.salaryTotal,
+      extras: summary.extrasTotal,
+      fixas,
+      gastos,
+      saldo,
+      saldoPrevisto,
+    });
     console.log('[telegram][planejamento] message preview:', message);
   }
 

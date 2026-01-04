@@ -5,11 +5,10 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { getOrCreateUser } from "../../services/userService";
 import { dayjs, TZ } from "../../utils/dates";
+import { API_TELEGRAM_ID } from "../../utils/systemUsers";
 import { AuthedRequest } from "../middleware/auth";
 
 const router = Router();
-
-const API_TELEGRAM_ID = "api-admin";
 
 function centsToNumber(cents: number) {
   return Number((cents / 100).toFixed(2));

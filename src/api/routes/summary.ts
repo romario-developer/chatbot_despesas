@@ -1,66 +1,43 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
-import { dayjs, TZ } from '../../utils/dates';
+import { AuthedRequest } from '../middleware/auth';
+import { getMonthlySummaryByAuthSub } from '../../services/monthlySummaryService';
 
 const router = Router();
 
-function centsToNumber(cents: number) {
-  return Number((cents / 100).toFixed(2));
-}
-
-router.get('/', async (req, res) => {
+router.get('/', async (req: AuthedRequest, res) => {
   const { month } = req.query;
 
-  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ error: 'Parametro "month" e obrigatorio no formato YYYY-MM' });
+  try {
+    const summary = await getMonthlySummaryByAuthSub({
+      sub: req.auth?.sub,
+      month: typeof month === 'string' ? month : '',
+    });
+
+    return res.json({
+      month: summary.month,
+      total: summary.total,
+      totalPorCategoria: summary.totalPorCategoria.map((item) => ({
+        category: item.category,
+        total: item.total,
+      })),
+      totalPorDia: summary.totalPorDia.map((item) => ({
+        date: item.date,
+        total: item.total,
+      })),
+      salary: summary.salaryTotal,
+      extras: summary.extrasTotal,
+      fixas: summary.fixedPlannedTotal,
+      saldo: summary.balance,
+      saldoPrevisto: summary.forecastBalance,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao calcular resumo';
+    if (message.toLowerCase().includes('month')) {
+      return res.status(400).json({ error: message });
+    }
+    return res.status(500).json({ error: 'Erro ao calcular resumo' });
   }
-
-  const parsed = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ);
-  if (!parsed.isValid()) {
-    return res.status(400).json({ error: 'Parƒmetro "month" inv lido' });
-  }
-
-  const start = parsed.startOf('month');
-  const end = start.endOf('month');
-
-  const expenses = await prisma.expense.findMany({
-    where: {
-      source: { not: 'manual' },
-      date: {
-        gte: start.toDate(),
-        lte: end.toDate(),
-      },
-    },
-    include: { category: true },
-  });
-
-  let totalCents = 0;
-  const totalPorCategoria = new Map<string, number>();
-  const totalPorDia = new Map<string, number>();
-
-  for (const expense of expenses) {
-    totalCents += expense.amountCents;
-
-    const catKey = expense.category.name;
-    totalPorCategoria.set(catKey, (totalPorCategoria.get(catKey) ?? 0) + expense.amountCents);
-
-    const dateKey = dayjs(expense.date).tz(TZ).format('YYYY-MM-DD');
-    totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + expense.amountCents);
-  }
-
-  return res.json({
-    month,
-    total: centsToNumber(totalCents),
-    totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
-      category,
-      total: centsToNumber(cents),
-    })),
-    totalPorDia: Array.from(totalPorDia.entries()).map(([date, cents]) => ({
-      date,
-      total: centsToNumber(cents),
-    })),
-  });
 });
 
 export default router;

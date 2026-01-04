@@ -1,147 +1,103 @@
-import { prisma } from '../db/prisma';
-import { dayjs, TZ } from '../utils/dates';
-import { getPlanningByUserId } from './planningService';
+import { prisma } from "../db/prisma";
+import { dayjs, TZ } from "../utils/dates";
+import { API_TELEGRAM_ID } from "../utils/systemUsers";
+import { getPlanningByUserId } from "./planningService";
+import { getOrCreateUser } from "./userService";
 
-type MonthlySummaryCategory = {
-  categoryId: number;
-  categoryName: string;
-  totalExpenses: number;
-  totalIncomes: number;
-};
+type SummaryCategory = { category: string; totalCents: number; total: number };
+type SummaryDay = { date: string; totalCents: number; total: number };
 
-type MonthlySummaryTransaction = {
-  id: number;
-  date: string;
-  description: string;
-  categoryId: number;
-  categoryName: string;
-  amount: number;
-  type: 'expense' | 'income';
-};
-
-export type MonthlySummary = {
+export type MonthlySummaryResult = {
   month: string;
-  incomeTotal: number;
-  expenseTotal: number;
+  start: Date;
+  end: Date;
+  totalCents: number;
+  total: number;
+  totalPorCategoria: SummaryCategory[];
+  totalPorDia: SummaryDay[];
+  salaryTotal: number;
+  extrasTotal: number;
   fixedPlannedTotal: number;
   balance: number;
-  plannedBalance: number;
-  byCategory: MonthlySummaryCategory[];
-  lastTransactions: MonthlySummaryTransaction[];
+  forecastBalance: number;
 };
 
-function centsToAmount(cents: number): number {
-  return Number((cents / 100).toFixed(2));
+export async function getMonthlySummaryByAuthSub(params: { sub?: string; month: string }) {
+  const telegramId = params.sub === "admin" ? API_TELEGRAM_ID : params.sub ?? API_TELEGRAM_ID;
+  const user = await getOrCreateUser(telegramId);
+  return getMonthlySummaryByUserId({ userId: user.id, month: params.month });
 }
 
-function amountToCents(value: unknown): number {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-  return Math.round(value * 100);
-}
+export async function getMonthlySummaryByUserId(params: { userId: number; month: string }) {
+  const { userId, month } = params;
 
-function parseMonth(month: string) {
-  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
-    throw new Error('Parametro "month" e obrigatorio no formato YYYY-MM');
+  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
+    throw new Error('Parametro "month" é obrigatório no formato YYYY-MM');
   }
 
-  const parsed = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ);
+  const parsed = dayjs.tz(`${month}-01`, "YYYY-MM-DD", TZ);
   if (!parsed.isValid()) {
-    throw new Error('Parametro "month" invalido');
+    throw new Error('Parâmetro "month" inválido');
   }
 
-  const start = parsed.startOf('month');
-  const end = start.endOf('month');
-  return { start: start.toDate(), end: end.toDate() };
-}
+  const start = parsed.startOf("month");
+  const end = start.endOf("month");
 
-function debugMonthlySummary(params: { userId: number; month: string; count: number }) {
-  if (process.env.NODE_ENV === 'production') return;
-  // eslint-disable-next-line no-console
-  console.debug(`[monthly-summary] userId=${params.userId} month=${params.month} count=${params.count}`);
-}
-
-export async function getMonthlySummaryByUserAndMonth(
-  userId: number,
-  month: string,
-): Promise<MonthlySummary> {
-  const { start, end } = parseMonth(month);
-
-  const [planning, expenses] = await Promise.all([
-    getPlanningByUserId(userId),
-    prisma.expense.findMany({
-      where: {
-        userId,
-        date: {
-          gte: start,
-          lte: end,
-        },
-      },
-      include: { category: true },
-      orderBy: { date: 'desc' },
-    }),
-  ]);
-
-  const expenseTotalCents = expenses.reduce((sum, exp) => sum + exp.amountCents, 0);
-
-  const salaryCents = amountToCents(planning.salaryByMonth[month] ?? 0);
-  const extrasCents = (planning.extrasByMonth[month] ?? []).reduce(
-    (sum, item) => sum + amountToCents(item.amount),
-    0,
-  );
-  const incomeTotalCents = salaryCents + extrasCents;
-
-  const fixedPlannedTotalCents = planning.fixedBills.reduce(
-    (sum, bill) => sum + amountToCents(bill.amount),
-    0,
-  );
-
-  const categoryMap = new Map<
-    number,
-    MonthlySummaryCategory & { totalExpensesCents: number; totalIncomesCents: number }
-  >();
-  expenses.forEach((exp) => {
-    const current = categoryMap.get(exp.categoryId) ?? {
-      categoryId: exp.categoryId,
-      categoryName: exp.category.name,
-      totalExpenses: 0,
-      totalExpensesCents: 0,
-      totalIncomes: 0,
-      totalIncomesCents: 0,
-    };
-    current.totalExpensesCents += exp.amountCents;
-    categoryMap.set(exp.categoryId, current);
+  const expenses = await prisma.expense.findMany({
+    where: {
+      userId,
+      source: { not: "manual" },
+      date: { gte: start.toDate(), lte: end.toDate() },
+    },
+    include: { category: true },
   });
 
-  const balanceCents = incomeTotalCents - expenseTotalCents;
-  const plannedBalanceCents = incomeTotalCents - expenseTotalCents - fixedPlannedTotalCents;
+  let totalCents = 0;
+  const totalPorCategoria = new Map<string, number>();
+  const totalPorDia = new Map<string, number>();
 
-  const lastTransactions: MonthlySummaryTransaction[] = expenses.slice(0, 10).map((exp) => ({
-    id: exp.id,
-    date: dayjs(exp.date).tz(TZ).format('YYYY-MM-DD'),
-    description: exp.description,
-    categoryId: exp.categoryId,
-    categoryName: exp.category.name,
-    amount: centsToAmount(exp.amountCents),
-    type: 'expense',
-  }));
+  for (const expense of expenses) {
+    totalCents += expense.amountCents;
 
-  debugMonthlySummary({ userId, month, count: expenses.length });
+    const catKey = expense.category.name;
+    totalPorCategoria.set(catKey, (totalPorCategoria.get(catKey) ?? 0) + expense.amountCents);
+
+    const dateKey = dayjs(expense.date).tz(TZ).format("YYYY-MM-DD");
+    totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + expense.amountCents);
+  }
+
+  const planning = await getPlanningByUserId(userId);
+  const salaryTotal = planning.salaryByMonth[month] ?? 0;
+  const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
+  const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
+  const receita = salaryTotal + extrasTotal;
+  const balance = receita - totalCents / 100;
+  const forecastBalance = receita - totalCents / 100 - fixedPlannedTotal;
 
   return {
     month,
-    incomeTotal: centsToAmount(incomeTotalCents),
-    expenseTotal: centsToAmount(expenseTotalCents),
-    fixedPlannedTotal: centsToAmount(fixedPlannedTotalCents),
-    balance: centsToAmount(balanceCents),
-    plannedBalance: centsToAmount(plannedBalanceCents),
-    byCategory: Array.from(categoryMap.values())
-      .map((item) => ({
-        categoryId: item.categoryId,
-        categoryName: item.categoryName,
-        totalExpenses: centsToAmount(item.totalExpensesCents),
-        totalIncomes: centsToAmount(item.totalIncomesCents),
-      }))
-      .sort((a, b) => b.totalExpenses - a.totalExpenses),
-    lastTransactions,
+    start: start.toDate(),
+    end: end.toDate(),
+    totalCents,
+    total: centsToNumber(totalCents),
+    totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
+      category,
+      totalCents: cents,
+      total: centsToNumber(cents),
+    })),
+    totalPorDia: Array.from(totalPorDia.entries()).map(([date, cents]) => ({
+      date,
+      totalCents: cents,
+      total: centsToNumber(cents),
+    })),
+    salaryTotal,
+    extrasTotal,
+    fixedPlannedTotal,
+    balance,
+    forecastBalance,
   };
+}
+
+function centsToNumber(cents: number) {
+  return Number((cents / 100).toFixed(2));
 }
