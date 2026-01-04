@@ -3,13 +3,14 @@ import dotenv from "dotenv";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 
-import apiRouter from "./api";
+import apiRouter, { API_BASE_PATH } from "./api";
 import { bot } from "./bot/botInstance";
 import "./utils/dates";
 
 dotenv.config();
 process.env.TZ = "America/Fortaleza";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
 const PWA_ORIGIN = process.env.PWA_ORIGIN;
 if (!PWA_ORIGIN) throw new Error("Defina PWA_ORIGIN nas variaveis de ambiente");
 
@@ -23,7 +24,7 @@ const IS_RENDER = Boolean(process.env.RENDER);
 
 const app = express();
 const allowedOrigins = [PWA_ORIGIN];
-if (process.env.NODE_ENV !== "production") {
+if (IS_DEV) {
   allowedOrigins.push("http://localhost:5173");
 }
 
@@ -88,7 +89,11 @@ app.use(
   }),
 );
 app.use(express.json());
-app.use("/api", apiRouter);
+app.use(API_BASE_PATH, apiRouter);
+
+if (IS_DEV) {
+  logApiRoutes();
+}
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
@@ -135,4 +140,20 @@ async function startWebhookOrPolling() {
   } else {
     await startPolling();
   }
+}
+
+function logApiRoutes() {
+  const routes = [
+    `${API_BASE_PATH}/health`,
+    `${API_BASE_PATH}/auth (login: POST ${API_BASE_PATH}/auth/login)`,
+    `${API_BASE_PATH}/telegram`,
+    `${API_BASE_PATH}/entries`,
+    `${API_BASE_PATH}/categories`,
+    `${API_BASE_PATH}/reports`,
+    `${API_BASE_PATH}/summary`,
+    `${API_BASE_PATH}/planning`,
+  ];
+
+  console.log(`[routes] API base path: ${API_BASE_PATH}`);
+  routes.forEach((route) => console.log("[routes] Mounted:", route));
 }
