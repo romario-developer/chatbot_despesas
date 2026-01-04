@@ -28,6 +28,11 @@ export async function getMonthlySummaryByAuthSub(params: { sub?: string; month: 
   return getMonthlySummaryByUserId({ userId: user.id, month: params.month });
 }
 
+// Compat wrapper for existing routes (expects numeric userId)
+export async function getMonthlySummaryByUserAndMonth(userId: number, month: string) {
+  return getMonthlySummaryByUserId({ userId, month });
+}
+
 export async function getMonthlySummaryByUserId(params: { userId: number; month: string }) {
   const { userId, month } = params;
 
