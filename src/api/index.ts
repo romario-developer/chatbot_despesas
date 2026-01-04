@@ -14,7 +14,7 @@ export const API_BASE_PATH = '/api';
 const router = Router();
 
 router.get('/health', (_req, res) => {
-  return res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  return res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
 
 router.use('/auth', authRoutes);

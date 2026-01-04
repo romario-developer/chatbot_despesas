@@ -97,6 +97,14 @@ app.use(
   }),
 );
 app.use(express.json());
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    console.log(`[REQ] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
+  });
+  next();
+});
 app.use(API_BASE_PATH, apiRouter);
 
 if (IS_DEV) {
@@ -105,6 +113,11 @@ if (IS_DEV) {
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
+});
+
+app.use((req: Request, res: Response) => {
+  console.warn(`[app] 404 ${req.method} ${req.originalUrl}`);
+  return res.status(404).json({ error: "Not Found", path: req.originalUrl });
 });
 
 app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
@@ -159,7 +172,7 @@ function logApiRoutes() {
   const routes = [
     `${API_BASE_PATH}/health`,
     `${API_BASE_PATH}/auth (login: POST ${API_BASE_PATH}/auth/login)`,
-    `${API_BASE_PATH}/telegram`,
+    `${API_BASE_PATH}/telegram (status: GET ${API_BASE_PATH}/telegram/status)`,
     `${API_BASE_PATH}/entries`,
     `${API_BASE_PATH}/categories`,
     `${API_BASE_PATH}/reports`,
