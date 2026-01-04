@@ -8,7 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "start:render": "npx prisma migrate deploy && node dist/index.js",
+    "start:render": "npx prisma migrate resolve --rolled-back 20251231115554_init --schema prisma/schema.prisma || true && npx prisma migrate resolve --applied 20251231143117_init --schema prisma/schema.prisma || true && npx prisma migrate deploy && node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
