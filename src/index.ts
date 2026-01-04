@@ -10,6 +10,14 @@ import "./utils/dates";
 dotenv.config();
 process.env.TZ = "America/Fortaleza";
 
+process.on("unhandledRejection", (reason: any) => {
+  console.error("[FATAL] unhandledRejection:", (reason as any)?.stack || reason);
+});
+
+process.on("uncaughtException", (err: any) => {
+  console.error("[FATAL] uncaughtException:", (err as any)?.stack || err);
+});
+
 const IS_DEV = process.env.NODE_ENV !== "production";
 const PWA_ORIGIN = process.env.PWA_ORIGIN;
 if (!PWA_ORIGIN) throw new Error("Defina PWA_ORIGIN nas variaveis de ambiente");
@@ -104,6 +112,11 @@ app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
     return res.status(403).json({ error: "Origin not allowed" });
   }
   return next(err);
+});
+
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  console.error("[EXPRESS_ERROR]", req.method, req.originalUrl, err?.stack || err);
+  return res.status(500).json({ error: "Internal Server Error" });
 });
 
 async function startWebhook() {
