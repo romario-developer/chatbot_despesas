@@ -351,7 +351,7 @@ async function handleSalarioCommand(ctx: any) {
 
   await upsertPlanning(userId, updated);
 
-  await ctx.reply(`Sal rio de ${month.key} definido para ${formatBRL(amount)}`, {
+  await ctx.reply(`Salário de ${month.key} definido para ${formatBRL(amount)}`, {
     reply_markup: buildMenuKeyboard(),
   });
 }
@@ -452,18 +452,22 @@ async function handlePlanejamentoCommand(ctx: any) {
   const saldo = receita - gastos;
   const saldoPrevisto = receita - gastos - fixas;
 
-  const lines = [
+  const message = [
     `📅 Planejamento ${month.key}`,
     `Receita: ${formatBRL(receita)}`,
-    `- Sal rio: ${formatBRL(salary)}`,
+    `- Salário: ${formatBRL(salary)}`,
     `- Extras: ${formatBRL(extras)}`,
     `Fixas: ${formatBRL(fixas)}`,
-    `Gastos do mˆs: ${formatBRL(gastos)}`,
+    `Gastos do mês: ${formatBRL(gastos)}`,
     `Saldo: ${formatBRL(saldo)}`,
     `Saldo previsto: ${formatBRL(saldoPrevisto)}`,
-  ];
+  ].join('\n');
 
-  await ctx.reply(lines.join('\n'), { reply_markup: buildMenuKeyboard() });
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[telegram][planejamento] message preview:', message);
+  }
+
+  await ctx.reply(message, { reply_markup: buildMenuKeyboard() });
 }
 
 async function handleLinkCommand(ctx: any) {
@@ -717,7 +721,7 @@ export function registerCommandHandlers(bot: Bot) {
     try {
       await handleSalarioCommand(ctx);
     } catch {
-      await ctx.reply('Erro ao salvar sal rio. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Erro ao salvar salário. Tente novamente.', { reply_markup: buildMenuKeyboard() });
     }
   });
 
