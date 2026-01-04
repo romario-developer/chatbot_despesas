@@ -116,7 +116,7 @@ router.get("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const sub = req.auth?.sub ?? "admin";
+  const sub = req.auth?.sub === "admin" ? API_TELEGRAM_ID : req.auth?.sub ?? API_TELEGRAM_ID;
   const user = await getOrCreateUser(sub);
   const expense = await prisma.expense.findFirst({
     where: { id, userId: user.id },
