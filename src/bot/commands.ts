@@ -216,13 +216,15 @@ export async function handleRelatorioCommand(ctx: any) {
     if (!userId) return;
 
     const monthArg = (ctx.match as string | undefined)?.trim() ?? '';
-    const month = parseMonthArg(monthArg);
+    let month = parseMonthArg(monthArg);
 
     if (!month) {
-      await ctx.reply('Use: /relatorio YYYY-MM. Ex: /relatorio 2026-01', {
-        reply_markup: buildMenuKeyboard(),
-      });
-      return;
+      const now = nowBahia();
+      month = {
+        year: now.year(),
+        month: now.month() + 1,
+        key: `${now.year()}-${String(now.month() + 1).padStart(2, '0')}`,
+      };
     }
 
     const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
@@ -438,13 +440,15 @@ async function handlePlanejamentoCommand(ctx: any) {
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
 
-  const month = maybeMonth ? parseMonthArg(maybeMonth) : null;
+  let month = maybeMonth ? parseMonthArg(maybeMonth) : null;
 
   if (!month) {
-    await ctx.reply('Use: /planejamento YYYY-MM. Ex: /planejamento 2026-01', {
-      reply_markup: buildMenuKeyboard(),
-    });
-    return;
+    const now = nowBahia();
+    month = {
+      year: now.year(),
+      month: now.month() + 1,
+      key: `${now.year()}-${String(now.month() + 1).padStart(2, '0')}`,
+    };
   }
 
   const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
