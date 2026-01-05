@@ -287,6 +287,65 @@ router.get("/telegram/links", async (req, res) => {
   }
 });
 
+// Buscar vinculo usando mesma logica do bot (/id)
+router.get("/telegram/links/lookup", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const chatId = typeof req.query.chatId === "string" ? req.query.chatId.trim() : "";
+  const fromId = typeof req.query.fromId === "string" ? req.query.fromId.trim() : "";
+
+  const candidates: string[] = [];
+  if (chatId) candidates.push(chatId);
+  if (fromId && fromId !== chatId) candidates.push(fromId);
+
+  if (!candidates.length) {
+    return res.status(400).json({ error: "Informe chatId e/ou fromId" });
+  }
+
+  try {
+    let found: LinkInfo | null = null;
+    for (const candidate of candidates) {
+      const user = await prisma.user.findFirst({
+        where: { telegramChatId: candidate },
+        select: {
+          id: true,
+          telegramId: true,
+          telegramChatId: true,
+          createdAt: true,
+        },
+      });
+      if (user) {
+        found = {
+          id: user.id,
+          chatId: user.telegramChatId ?? null,
+          telegramUserId: user.telegramId,
+          userId: user.id,
+          userTelegramId: user.telegramId,
+          createdAt: user.createdAt,
+          updatedAt: null,
+          lastMessageAt: null,
+        };
+        break;
+      }
+    }
+
+    if (!found) {
+      return res.status(404).json({ error: "Vinculo nao encontrado" });
+    }
+
+    return res.json(found);
+  } catch (err) {
+    console.error("[admin][telegram/links/lookup] erro:", err);
+    return res.status(500).json({ error: "Falha ao buscar vinculo" });
+  }
+});
+
 // Buscar vinculo por telegramUserId
 router.get("/telegram/links/by-telegram-user/:telegramUserId", async (req, res) => {
   if (!ADMIN_TOKEN) {
@@ -304,7 +363,9 @@ router.get("/telegram/links/by-telegram-user/:telegramUserId", async (req, res) 
 
   try {
     const user = await prisma.user.findFirst({
-      where: { OR: [{ telegramId: telegramUserId.trim() }, { telegramChatId: telegramUserId.trim() }] },
+      where: {
+        OR: [{ telegramChatId: telegramUserId.trim() }, { telegramId: telegramUserId.trim() }],
+      },
       select: {
         id: true,
         telegramId: true,

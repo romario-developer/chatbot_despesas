@@ -20,6 +20,7 @@ import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
 import { generateResetToken } from '../services/resetService';
+import { prisma } from '../db/prisma';
 
 function parseMonthArg(raw?: string) {
   if (!raw) return null;
@@ -778,5 +779,56 @@ export function registerCommandHandlers(bot: Bot) {
     } catch {
       await ctx.reply('Erro ao consultar vincula‡Æo.', { reply_markup: buildMenuKeyboard() });
     }
+  });
+
+  bot.command(['id', 'debugid'], async (ctx) => {
+    const chatId = ctx.chat?.id;
+    const fromId = ctx.from?.id;
+    const type = ctx.chat?.type;
+
+    let linkInfo: {
+      linkId: number;
+      linkedUserId: number;
+      linkedTelegramId: string;
+      chatId: string | null;
+      createdAt: Date;
+    } | null = null;
+
+    const candidates: string[] = [];
+    if (typeof chatId !== 'undefined') candidates.push(String(chatId));
+    if (typeof fromId !== 'undefined' && (!chatId || chatId !== fromId)) candidates.push(String(fromId));
+
+    for (const candidate of candidates) {
+      const user = await prisma.user.findFirst({
+        where: { telegramChatId: candidate },
+        select: { id: true, telegramId: true, telegramChatId: true, createdAt: true },
+      });
+      if (user) {
+        linkInfo = {
+          linkId: user.id,
+          linkedUserId: user.id,
+          linkedTelegramId: user.telegramId,
+          chatId: user.telegramChatId,
+          createdAt: user.createdAt,
+        };
+        break;
+      }
+    }
+
+    const lines = [
+      `chatId: ${chatId ?? 'n/a'}`,
+      `fromId: ${fromId ?? 'n/a'}`,
+      `chatType: ${type ?? 'n/a'}`,
+    ];
+
+    if (linkInfo) {
+      lines.push(
+        `vinculo: linkId=${linkInfo.linkId} userId=${linkInfo.linkedUserId} telegramId=${linkInfo.linkedTelegramId} chatId=${linkInfo.chatId} createdAt=${linkInfo.createdAt.toISOString()}`,
+      );
+    } else {
+      lines.push('vinculo: nao encontrado');
+    }
+
+    await ctx.reply(lines.join('\n'), { reply_markup: buildMenuKeyboard() });
   });
 }
