@@ -287,6 +287,49 @@ router.get("/telegram/links", async (req, res) => {
   }
 });
 
+// Buscar vinculo por telegramUserId
+router.get("/telegram/links/by-telegram-user/:telegramUserId", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const telegramUserId = req.params.telegramUserId;
+  if (!telegramUserId || !telegramUserId.trim()) {
+    return res.status(400).json({ error: "telegramUserId obrigatorio" });
+  }
+
+  try {
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ telegramId: telegramUserId.trim() }, { telegramChatId: telegramUserId.trim() }] },
+      select: {
+        id: true,
+        telegramId: true,
+        telegramChatId: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "Vinculo nao encontrado" });
+    }
+
+    return res.json({
+      chatId: user.telegramChatId ?? null,
+      userId: user.id,
+      telegramUserId: user.telegramId,
+      createdAt: user.createdAt,
+      updatedAt: null,
+    });
+  } catch (err) {
+    console.error("[admin][telegram/links/by-telegram-user] erro:", err);
+    return res.status(500).json({ error: "Falha ao buscar vinculo" });
+  }
+});
+
 async function migrateUserDataById(oldUserId: number, newTelegramId: string): Promise<MigrateByIdResult> {
   const oldUser = await prisma.user.findUnique({ where: { id: oldUserId } });
   if (!oldUser) {
