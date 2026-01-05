@@ -11,8 +11,10 @@ export type MonthlySummaryResult = {
   month: string;
   start: Date;
   end: Date;
+  expensesCount: number;
   totalCents: number;
   total: number;
+  totalExpenses: number;
   totalPorCategoria: SummaryCategory[];
   totalPorDia: SummaryDay[];
   salaryTotal: number;
@@ -76,15 +78,33 @@ export async function getMonthlySummaryByUserId(params: { userId: number; month:
   const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
   const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
   const receita = salaryTotal + extrasTotal;
-  const balance = receita - totalCents / 100;
-  const forecastBalance = receita - totalCents / 100 - fixedPlannedTotal;
+  const totalExpenses = centsToNumber(totalCents);
+  const balance = receita - totalExpenses;
+  const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%.2f extras=%.2f fixas=%.2f",
+      userId,
+      month,
+      start.toISOString(),
+      end.toISOString(),
+      expenses.length,
+      totalCents,
+      salaryTotal,
+      extrasTotal,
+      fixedPlannedTotal,
+    );
+  }
 
   return {
     month,
     start: start.toDate(),
     end: end.toDate(),
+    expensesCount: expenses.length,
     totalCents,
     total: centsToNumber(totalCents),
+    totalExpenses,
     totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
       category,
       totalCents: cents,

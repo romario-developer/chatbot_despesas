@@ -17,6 +17,8 @@ router.get('/', async (req: AuthedRequest, res) => {
     return res.json({
       month: summary.month,
       total: summary.total,
+      totalExpenses: summary.totalExpenses,
+      expensesCount: summary.expensesCount,
       totalPorCategoria: summary.totalPorCategoria.map((item) => ({
         category: item.category,
         total: item.total,

@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+﻿import { randomUUID } from 'crypto';
 import { Bot, InlineKeyboard } from 'grammy';
 import { amountStringToCents, formatCurrency, formatCurrencyNumber } from '../utils/money';
 import { formatDate, nowBahia, parseDateFromText, dayjs, TZ } from '../utils/dates';
@@ -10,11 +10,12 @@ import {
   updateExpenseDate,
   updateExpenseDescription,
 } from '../services/expenseService';
-import { getMonthlyExpensesPage, getMonthlyReport } from '../services/reportService';
+import { getMonthlyExpensesPage } from '../services/reportService';
 import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
+import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
 import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
@@ -211,7 +212,8 @@ export async function sendCategorias(ctx: any) {
 
 export async function handleRelatorioCommand(ctx: any, opts?: { month?: number; year?: number }) {
   try {
-    const telegramId = requireTelegramId(ctx);
+    const userId = await requireLinkedUserId(ctx);
+    if (!userId) return;
     const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
     const now = nowBahia();
     let month = opts?.month ?? now.month() + 1;
@@ -227,14 +229,32 @@ export async function handleRelatorioCommand(ctx: any, opts?: { month?: number; 
       year = Number.parseInt(match[2], 10);
     }
 
-    const report = await getMonthlyReport(telegramId, month, year);
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const summary = await getMonthlySummaryByUserId({ userId, month: monthKey });
 
-    const periodLine = `Período: ${formatDate(report.start)} a ${formatDate(report.end)}`;
-    const header = `<b>Relatório — ${String(month).padStart(2, '0')}/${year}</b>`;
-    const countLine = `Lançamentos: ${report.expensesCount}`;
-    const totalLine = `<b>Total: ${formatCurrency(report.totalCents)}</b>`;
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[telegram][relatorio] summary:', {
+        userId,
+        month: monthKey,
+        expensesCount: summary.expensesCount,
+        totalCents: summary.totalCents,
+        total: summary.total,
+      });
+    }
 
-    const categoryBlock = buildCategoryBlock(report.categorySummary, report.totalCents);
+    const periodLine = `Período: ${formatDate(summary.start)} a ${formatDate(summary.end)}`;
+    const header = `<b>Relatório - ${String(month).padStart(2, '0')}/${year}</b>`;
+    const countLine = `Lançamentos: ${summary.expensesCount}`;
+    const totalLine = `<b>Total: ${formatCurrency(summary.totalCents)}</b>`;
+
+    const categoryBlock = buildCategoryBlock(
+      summary.totalPorCategoria.map((c) => ({
+        name: c.category,
+        totalCents: c.totalCents,
+        count: 0,
+      })),
+      summary.totalCents,
+    );
 
     const parts = [header, periodLine, countLine, totalLine, '', categoryBlock];
 
@@ -461,10 +481,14 @@ async function handlePlanejamentoCommand(ctx: any) {
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[telegram][planejamento] summary:', {
+      userId,
       month: month.key,
       salary: summary.salaryTotal,
       extras: summary.extrasTotal,
       fixas,
+      expensesCount: summary.expensesCount,
+      totalCents: summary.totalCents,
+      total: summary.total,
       gastos,
       saldo,
       saldoPrevisto,
