@@ -22,10 +22,10 @@ export type MonthlySummaryResult = {
   forecastBalance: number;
 };
 
-export async function getMonthlySummary(params: { userId: string; month: string }) {
+export async function getMonthlySummary(params: { userId: number | string; month: string }) {
   const { userId, month } = params;
 
-  if (typeof userId !== "string" || !userId.trim()) {
+  if (userId === undefined || userId === null || (typeof userId === "string" && !userId.trim())) {
     throw new Error('Parametro "userId" e obrigatorio');
   }
 
@@ -78,6 +78,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
   const balance = receita - totalExpenses;
   const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
 
+  console.log("[monthly-summary]", { userId: numericUserId, month });
   console.log("SUMMARY", { userId: numericUserId, month, totalExpenses });
 
   if (process.env.NODE_ENV !== "production") {

@@ -3,9 +3,7 @@ import { Router } from "express";
 
 import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
-import { getOrCreateUser } from "../../services/userService";
 import { dayjs, TZ } from "../../utils/dates";
-import { API_TELEGRAM_ID } from "../../utils/systemUsers";
 import { AuthedRequest } from "../middleware/auth";
 
 const router = Router();
@@ -59,15 +57,22 @@ function mapExpense(expense: {
   };
 }
 
-async function ensureApiUser() {
-  return getOrCreateUser(API_TELEGRAM_ID);
+function requireUserId(req: AuthedRequest): number | null {
+  const id = req.user?.id;
+  if (!id || !Number.isInteger(id)) return null;
+  return id;
 }
 
-router.get("/", async (req, res) => {
+router.get("/", async (req: AuthedRequest, res) => {
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Usuario nao autenticado" });
+  }
+
   const { from, to, category, q } = req.query;
 
   const filters: Prisma.ExpenseWhereInput[] = [];
-  filters.push({ source: { not: "manual" } });
+  filters.push({ userId, source: { not: "manual" } });
 
   const fromDate = from ? parseDateOnly(from) : null;
   if (from && !fromDate) {
@@ -115,10 +120,13 @@ router.get("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const sub = req.auth?.sub === "admin" ? API_TELEGRAM_ID : req.auth?.sub ?? API_TELEGRAM_ID;
-  const user = await getOrCreateUser(sub);
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Usuario nao autenticado" });
+  }
+
   const expense = await prisma.expense.findFirst({
-    where: { id, userId: user.id },
+    where: { id, userId },
     include: { category: true },
   });
 
@@ -129,7 +137,12 @@ router.get("/:id", async (req: AuthedRequest, res) => {
   return res.json(mapExpense(expense));
 });
 
-router.post("/", async (req, res) => {
+router.post("/", async (req: AuthedRequest, res) => {
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Usuario nao autenticado" });
+  }
+
   const { amount, description, category, date } = req.body ?? {};
 
   const amountCents = parseAmountToCents(amount);
@@ -150,12 +163,11 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "date invalida. Use YYYY-MM-DD" });
   }
 
-  const user = await ensureApiUser();
-  const categoryRow = await getOrCreateCategory(user.id, category);
+  const categoryRow = await getOrCreateCategory(userId, category);
 
   const expense = await prisma.expense.create({
     data: {
-      userId: user.id,
+      userId,
       categoryId: categoryRow.id,
       amountCents,
       description: description.trim(),
@@ -169,10 +181,15 @@ router.post("/", async (req, res) => {
   return res.status(201).json(mapExpense(expense));
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "ID invalido" });
+  }
+
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Usuario nao autenticado" });
   }
 
   const { amount, description, category, date } = req.body ?? {};
@@ -186,7 +203,7 @@ router.put("/:id", async (req, res) => {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
   }
 
-  const existing = await prisma.expense.findUnique({ where: { id }, include: { category: true } });
+  const existing = await prisma.expense.findFirst({ where: { id, userId }, include: { category: true } });
   if (!existing) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
   }
@@ -234,13 +251,18 @@ router.put("/:id", async (req, res) => {
   return res.json(mapExpense(updated));
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const existing = await prisma.expense.findUnique({ where: { id }, include: { category: true } });
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Usuario nao autenticado" });
+  }
+
+  const existing = await prisma.expense.findFirst({ where: { id, userId }, include: { category: true } });
   if (!existing) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
   }

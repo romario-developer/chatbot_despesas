@@ -26,7 +26,7 @@ router.get('/monthly-summary', async (req: AuthedRequest, res) => {
 
   try {
     const summary = await getMonthlySummary({
-      userId: String(userId),
+      userId,
       month,
     });
     return res.json(summary);
