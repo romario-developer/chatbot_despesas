@@ -48,6 +48,17 @@ type MigrateResult = {
 
 type MigrateByIdResult = MigrateResult;
 
+type LinkInfo = {
+  id: number;
+  chatId: string | null;
+  telegramUserId: string;
+  userId: number;
+  userTelegramId: string;
+  createdAt: Date;
+  updatedAt?: Date | null;
+  lastMessageAt?: Date | null;
+};
+
 async function resolveUserByTelegramId(telegramId: string) {
   return prisma.user.findFirst({
     where: { OR: [{ telegramId }, { telegramChatId: telegramId }] },
@@ -234,6 +245,45 @@ router.get("/users/with-counts", async (req, res) => {
   } catch (err) {
     console.error("[admin][users/with-counts] erro:", err);
     return res.status(500).json({ error: "Falha ao listar usuarios" });
+  }
+});
+
+// Listar links do Telegram para diagnostico de chatId vinculado
+router.get("/telegram/links", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const links = await prisma.user.findMany({
+      select: {
+        id: true,
+        telegramId: true,
+        telegramChatId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const mapped: LinkInfo[] = links.map((u) => ({
+      id: u.id,
+      chatId: u.telegramChatId ?? null,
+      telegramUserId: u.telegramId,
+      userId: u.id,
+      userTelegramId: u.telegramId,
+      createdAt: u.createdAt,
+      updatedAt: null,
+      lastMessageAt: null,
+    }));
+
+    return res.json(mapped);
+  } catch (err) {
+    console.error("[admin][telegram/links] erro:", err);
+    return res.status(500).json({ error: "Falha ao listar links do Telegram" });
   }
 });
 
