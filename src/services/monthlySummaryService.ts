@@ -1,8 +1,6 @@
 import { prisma } from "../db/prisma";
 import { dayjs, TZ } from "../utils/dates";
-import { API_TELEGRAM_ID } from "../utils/systemUsers";
 import { getPlanningByUserId } from "./planningService";
-import { getOrCreateUser } from "./userService";
 
 type SummaryCategory = { category: string; totalCents: number; total: number };
 type SummaryDay = { date: string; totalCents: number; total: number };
@@ -24,27 +22,25 @@ export type MonthlySummaryResult = {
   forecastBalance: number;
 };
 
-export async function getMonthlySummaryByAuthSub(params: { sub?: string; month: string }) {
-  const telegramId = params.sub === "admin" ? API_TELEGRAM_ID : params.sub ?? API_TELEGRAM_ID;
-  const user = await getOrCreateUser(telegramId);
-  return getMonthlySummaryByUserId({ userId: user.id, month: params.month });
-}
-
-// Compat wrapper for existing routes (expects numeric userId)
-export async function getMonthlySummaryByUserAndMonth(userId: number, month: string) {
-  return getMonthlySummaryByUserId({ userId, month });
-}
-
-export async function getMonthlySummaryByUserId(params: { userId: number; month: string }) {
+export async function getMonthlySummary(params: { userId: string; month: string }) {
   const { userId, month } = params;
 
+  if (typeof userId !== "string" || !userId.trim()) {
+    throw new Error('Parametro "userId" e obrigatorio');
+  }
+
+  const numericUserId = Number(userId);
+  if (!Number.isInteger(numericUserId) || numericUserId <= 0) {
+    throw new Error('Parametro "userId" e invalido');
+  }
+
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
-    throw new Error('Parametro "month" é obrigatório no formato YYYY-MM');
+    throw new Error('Parametro "month" e obrigatorio no formato YYYY-MM');
   }
 
   const parsed = dayjs.tz(`${month}-01`, "YYYY-MM-DD", TZ);
   if (!parsed.isValid()) {
-    throw new Error('Parâmetro "month" inválido');
+    throw new Error('Parametro "month" invalido');
   }
 
   const start = parsed.startOf("month");
@@ -52,7 +48,7 @@ export async function getMonthlySummaryByUserId(params: { userId: number; month:
 
   const expenses = await prisma.expense.findMany({
     where: {
-      userId,
+      userId: numericUserId,
       source: { not: "manual" },
       date: { gte: start.toDate(), lte: end.toDate() },
     },
@@ -73,7 +69,7 @@ export async function getMonthlySummaryByUserId(params: { userId: number; month:
     totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + expense.amountCents);
   }
 
-  const planning = await getPlanningByUserId(userId);
+  const planning = await getPlanningByUserId(numericUserId);
   const salaryTotal = planning.salaryByMonth[month] ?? 0;
   const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
   const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
@@ -82,10 +78,12 @@ export async function getMonthlySummaryByUserId(params: { userId: number; month:
   const balance = receita - totalExpenses;
   const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
 
+  console.log("SUMMARY", { userId: numericUserId, month, totalExpenses });
+
   if (process.env.NODE_ENV !== "production") {
     console.log(
       "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%.2f extras=%.2f fixas=%.2f",
-      userId,
+      numericUserId,
       month,
       start.toISOString(),
       end.toISOString(),

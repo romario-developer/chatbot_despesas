@@ -2,13 +2,7 @@ import { randomUUID } from 'crypto';
 import { Router } from 'express';
 
 import { AuthedRequest } from '../middleware/auth';
-import { getOrCreateUser } from '../../services/userService';
-import {
-  DEFAULT_PLANNING,
-  PlanningData,
-  getPlanningByUserId,
-  upsertPlanning,
-} from '../../services/planningService';
+import { DEFAULT_PLANNING, PlanningData, getPlanningByUserId, upsertPlanning } from '../../services/planningService';
 
 const router = Router();
 
@@ -73,18 +67,30 @@ function normalizePlanning(input: any): PlanningData {
   return normalized;
 }
 
+function requireUserId(req: AuthedRequest): number | null {
+  const id = req.user?.id;
+  if (!id || !Number.isInteger(id)) return null;
+  return id;
+}
+
 router.get('/', async (req: AuthedRequest, res) => {
-  const sub = req.auth?.sub ?? 'admin';
-  const user = await getOrCreateUser(sub);
-  const planning = await getPlanningByUserId(user.id);
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: 'Usuario nao autenticado' });
+  }
+
+  const planning = await getPlanningByUserId(userId);
   return res.json(planning ?? DEFAULT_PLANNING);
 });
 
 router.put('/', async (req: AuthedRequest, res) => {
-  const sub = req.auth?.sub ?? 'admin';
-  const user = await getOrCreateUser(sub);
+  const userId = requireUserId(req);
+  if (!userId) {
+    return res.status(401).json({ error: 'Usuario nao autenticado' });
+  }
+
   const normalized = normalizePlanning(req.body ?? {});
-  const saved = await upsertPlanning(user.id, normalized);
+  const saved = await upsertPlanning(userId, normalized);
   return res.json(saved ?? DEFAULT_PLANNING);
 });
 

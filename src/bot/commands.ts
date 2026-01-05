@@ -15,7 +15,7 @@ import { getOrCreateUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
-import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
+import { getMonthlySummary } from '../services/monthlySummaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
@@ -209,41 +209,36 @@ export async function sendCategorias(ctx: any) {
   await ctx.reply(`Categorias:\n${names}`, { reply_markup: buildMenuKeyboard() });
 }
 
-export async function handleRelatorioCommand(ctx: any, opts?: { month?: number; year?: number }) {
+export async function handleRelatorioCommand(ctx: any) {
   try {
     const userId = await requireLinkedUserId(ctx);
     if (!userId) return;
-    const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
-    const now = nowBahia();
-    let month = opts?.month ?? now.month() + 1;
-    let year = opts?.year ?? now.year();
 
-    if (!opts && args && args !== 'mes') {
-      const match = args.match(/(\d{1,2})\/(\d{4})/);
-      if (!match) {
-        await ctx.reply('Use "mes" ou "MM/AAAA". Ex: /relatorio 12/2025');
-        return;
-      }
-      month = Number.parseInt(match[1], 10);
-      year = Number.parseInt(match[2], 10);
+    const monthArg = (ctx.match as string | undefined)?.trim() ?? '';
+    const month = parseMonthArg(monthArg);
+
+    if (!month) {
+      await ctx.reply('Use: /relatorio YYYY-MM. Ex: /relatorio 2026-01', {
+        reply_markup: buildMenuKeyboard(),
+      });
+      return;
     }
 
-    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-    const summary = await getMonthlySummaryByUserId({ userId, month: monthKey });
+    const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('[telegram][relatorio] summary:', {
         userId,
-        month: monthKey,
+        month: month.key,
         expensesCount: summary.expensesCount,
         totalCents: summary.totalCents,
         total: summary.total,
       });
     }
 
-    const periodLine = `Período: ${formatDate(summary.start)} a ${formatDate(summary.end)}`;
-    const header = `<b>Relatório - ${String(month).padStart(2, '0')}/${year}</b>`;
-    const countLine = `Lançamentos: ${summary.expensesCount}`;
+    const periodLine = `Periodo: ${formatDate(summary.start)} a ${formatDate(summary.end)}`;
+    const header = `<b>Relatorio - ${String(month.month).padStart(2, '0')}/${month.year}</b>`;
+    const countLine = `Lancamentos: ${summary.expensesCount}`;
     const totalLine = `<b>Total: ${formatCurrency(summary.totalCents)}</b>`;
 
     const categoryBlock = buildCategoryBlock(
@@ -257,11 +252,12 @@ export async function handleRelatorioCommand(ctx: any, opts?: { month?: number; 
 
     const parts = [header, periodLine, countLine, totalLine, '', categoryBlock];
 
-    const message = parts.join('\n');
+    const message = parts.join('
+');
 
     await ctx.reply(message, { parse_mode: 'HTML', reply_markup: buildMenuKeyboard() });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Erro ao gerar relatório.';
+    const message = err instanceof Error ? err.message : 'Erro ao gerar relatorio.';
     await ctx.reply(message);
   }
 }
@@ -442,24 +438,16 @@ async function handlePlanejamentoCommand(ctx: any) {
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
 
-  let month = maybeMonth ? parseMonthArg(maybeMonth) : null;
-  if (maybeMonth && !month) {
+  const month = maybeMonth ? parseMonthArg(maybeMonth) : null;
+
+  if (!month) {
     await ctx.reply('Use: /planejamento YYYY-MM. Ex: /planejamento 2026-01', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
   }
 
-  if (!month) {
-    const now = nowBahia();
-    month = {
-      year: now.year(),
-      month: now.month() + 1,
-      key: `${now.year()}-${String(now.month() + 1).padStart(2, '0')}`,
-    };
-  }
-
-  const summary = await getMonthlySummaryByUserId({ userId, month: month.key });
+  const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
 
   const receita = summary.salaryTotal + summary.extrasTotal;
   const fixas = summary.fixedPlannedTotal;
@@ -468,12 +456,12 @@ async function handlePlanejamentoCommand(ctx: any) {
   const saldoPrevisto = summary.forecastBalance;
 
   const message = [
-    `📅 Planejamento ${month.key}`,
+    `?? Planejamento ${month.key}`,
     `Receita: ${formatBRL(receita)}`,
-    `- Salário: ${formatBRL(summary.salaryTotal)}`,
+    `- Salario: ${formatBRL(summary.salaryTotal)}`,
     `- Extras: ${formatBRL(summary.extrasTotal)}`,
     `Fixas: ${formatBRL(fixas)}`,
-    `Gastos do mês: ${formatBRL(gastos)}`,
+    `Gastos do mes: ${formatBRL(gastos)}`,
     `Saldo: ${formatBRL(saldo)}`,
     `Saldo previsto: ${formatBRL(saldoPrevisto)}`,
   ].join('\n');

@@ -1,22 +1,38 @@
 import { Router } from 'express';
 
-import { getMonthlySummaryByAuthSub } from '../../services/monthlySummaryService';
+import { getMonthlySummary } from '../../services/monthlySummaryService';
 import { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
 
+function parseMonthParam(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) return null;
+  return normalized;
+}
+
 router.get('/monthly-summary', async (req: AuthedRequest, res) => {
-  const { month } = req.query;
+  const month = parseMonthParam(req.query.month);
+  const userId = req.user?.id;
+
+  if (!month) {
+    return res.status(400).json({ error: 'Parametro "month" e obrigatorio no formato YYYY-MM' });
+  }
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Usuario nao autenticado' });
+  }
 
   try {
-    const summary = await getMonthlySummaryByAuthSub({
-      sub: req.auth?.sub,
-      month: typeof month === 'string' ? month : '',
+    const summary = await getMonthlySummary({
+      userId: String(userId),
+      month,
     });
     return res.json(summary);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo.';
-    if (message.toLowerCase().includes('month')) {
+    if (message.toLowerCase().includes('month') || message.toLowerCase().includes('user')) {
       return res.status(400).json({ error: message });
     }
     return res.status(500).json({ error: 'Erro ao calcular resumo.' });

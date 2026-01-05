@@ -88,7 +88,7 @@ async function handleSessionInput(ctx: any, telegramId: string, mode: string, dr
 async function handleMenuShortcut(ctx: any, text: string) {
   const label = text.trim();
   if (label === MENU_LABELS.report) {
-    await handleRelatorioCommand(ctx, { month: undefined, year: undefined });
+    await handleRelatorioCommand(ctx);
     return true;
   }
   if (label === MENU_LABELS.expenses) {
