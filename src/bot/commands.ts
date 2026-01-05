@@ -16,7 +16,6 @@ import { ensureDefaultCategory, listCategories } from '../services/categoryServi
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
 import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
-import { getMonthlySummaryByUserId } from '../services/monthlySummaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
