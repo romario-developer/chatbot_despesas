@@ -5,6 +5,8 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { dayjs, TZ } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
+import { resolveAuthUserId } from "../utils/authUser";
+import { getOrCreateUser } from "../../services/userService";
 
 const router = Router();
 
@@ -57,22 +59,18 @@ function mapExpense(expense: {
   };
 }
 
-function requireUserId(req: AuthedRequest): number | null {
-  const id = req.user?.id;
-  if (!id || !Number.isInteger(id)) return null;
-  return id;
+async function resolveUser(req: AuthedRequest) {
+  const telegramId = resolveAuthUserId(req);
+  return getOrCreateUser(telegramId);
 }
 
 router.get("/", async (req: AuthedRequest, res) => {
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Usuario nao autenticado" });
-  }
+  const user = await resolveUser(req);
 
   const { from, to, category, q } = req.query;
 
   const filters: Prisma.ExpenseWhereInput[] = [];
-  filters.push({ userId, source: { not: "manual" } });
+  filters.push({ userId: user.id, source: { not: "manual" } });
 
   const fromDate = from ? parseDateOnly(from) : null;
   if (from && !fromDate) {
@@ -120,13 +118,10 @@ router.get("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Usuario nao autenticado" });
-  }
+  const user = await resolveUser(req);
 
   const expense = await prisma.expense.findFirst({
-    where: { id, userId },
+    where: { id, userId: user.id },
     include: { category: true },
   });
 
@@ -138,10 +133,7 @@ router.get("/:id", async (req: AuthedRequest, res) => {
 });
 
 router.post("/", async (req: AuthedRequest, res) => {
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Usuario nao autenticado" });
-  }
+  const user = await resolveUser(req);
 
   const { amount, description, category, date } = req.body ?? {};
 
@@ -163,11 +155,11 @@ router.post("/", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "date invalida. Use YYYY-MM-DD" });
   }
 
-  const categoryRow = await getOrCreateCategory(userId, category);
+  const categoryRow = await getOrCreateCategory(user.id, category);
 
   const expense = await prisma.expense.create({
     data: {
-      userId,
+      userId: user.id,
       categoryId: categoryRow.id,
       amountCents,
       description: description.trim(),
@@ -187,10 +179,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Usuario nao autenticado" });
-  }
+  const user = await resolveUser(req);
 
   const { amount, description, category, date } = req.body ?? {};
 
@@ -203,7 +192,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
   }
 
-  const existing = await prisma.expense.findFirst({ where: { id, userId }, include: { category: true } });
+  const existing = await prisma.expense.findFirst({ where: { id, userId: user.id }, include: { category: true } });
   if (!existing) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
   }
@@ -257,12 +246,9 @@ router.delete("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "ID invalido" });
   }
 
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Usuario nao autenticado" });
-  }
+  const user = await resolveUser(req);
 
-  const existing = await prisma.expense.findFirst({ where: { id, userId }, include: { category: true } });
+  const existing = await prisma.expense.findFirst({ where: { id, userId: user.id }, include: { category: true } });
   if (!existing) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
   }

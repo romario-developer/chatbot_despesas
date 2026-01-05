@@ -3,6 +3,8 @@ import { Router } from 'express';
 
 import { AuthedRequest } from '../middleware/auth';
 import { DEFAULT_PLANNING, PlanningData, getPlanningByUserId, upsertPlanning } from '../../services/planningService';
+import { resolveAuthUserId } from '../utils/authUser';
+import { getOrCreateUser } from '../../services/userService';
 
 const router = Router();
 
@@ -67,30 +69,19 @@ function normalizePlanning(input: any): PlanningData {
   return normalized;
 }
 
-function requireUserId(req: AuthedRequest): number | null {
-  const id = req.user?.id;
-  if (!id || !Number.isInteger(id)) return null;
-  return id;
-}
-
 router.get('/', async (req: AuthedRequest, res) => {
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: 'Usuario nao autenticado' });
-  }
-
-  const planning = await getPlanningByUserId(userId);
+  const telegramId = resolveAuthUserId(req);
+  const user = await getOrCreateUser(telegramId);
+  const planning = await getPlanningByUserId(user.id);
   return res.json(planning ?? DEFAULT_PLANNING);
 });
 
 router.put('/', async (req: AuthedRequest, res) => {
-  const userId = requireUserId(req);
-  if (!userId) {
-    return res.status(401).json({ error: 'Usuario nao autenticado' });
-  }
+  const telegramId = resolveAuthUserId(req);
+  const user = await getOrCreateUser(telegramId);
 
   const normalized = normalizePlanning(req.body ?? {});
-  const saved = await upsertPlanning(userId, normalized);
+  const saved = await upsertPlanning(user.id, normalized);
   return res.json(saved ?? DEFAULT_PLANNING);
 });
 
