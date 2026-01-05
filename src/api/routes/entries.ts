@@ -7,6 +7,7 @@ import { dayjs, TZ } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { resolveAuthUserId } from "../utils/authUser";
 import { getOrCreateUser } from "../../services/userService";
+import { getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
 
 const router = Router();
 
@@ -72,18 +73,21 @@ router.get("/", async (req: AuthedRequest, res) => {
   const filters: Prisma.ExpenseWhereInput[] = [];
   filters.push({ userId: user.id, source: { not: "manual" } });
 
-  const fromDate = from ? parseDateOnly(from) : null;
-  if (from && !fromDate) {
-    return res.status(400).json({ error: 'Parametro "from" invalido. Use YYYY-MM-DD.' });
+  const { start, endExclusive, error } = parseFromToQuery(
+    typeof from === "string" ? from : undefined,
+    typeof to === "string" ? to : undefined,
+  );
+  if (error) {
+    return res.status(400).json({ error });
   }
 
-  const toDate = to ? parseDateOnly(to) : null;
-  if (to && !toDate) {
-    return res.status(400).json({ error: 'Parametro "to" invalido. Use YYYY-MM-DD.' });
-  }
-
-  if (fromDate || toDate) {
-    filters.push({ date: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } });
+  if (start || endExclusive) {
+    filters.push({
+      date: { ...(start ? { gte: start } : {}), ...(endExclusive ? { lt: endExclusive } : {}) },
+    });
+  } else {
+    const { start: monthStart, endExclusive: monthEndExclusive } = getMonthRangeTZ(new Date(), TZ);
+    filters.push({ date: { gte: monthStart, lt: monthEndExclusive } });
   }
 
   if (typeof category === "string" && category.trim()) {

@@ -70,8 +70,4 @@ export function parseDateFromText(text: string) {
   return null;
 }
 
-export function getMonthRange(month: number, year: number) {
-  const start = dayjs.tz({ year, month: month - 1, day: 1 }, TZ).startOf('day');
-  const end = start.endOf('month');
-  return { start: start.toDate(), end: end.toDate() };
-}
+// getMonthRange deprecated: use dateRange helpers (getMonthRangeFromMonthYear)

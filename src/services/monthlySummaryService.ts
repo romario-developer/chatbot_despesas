@@ -2,6 +2,7 @@ import { prisma } from "../db/prisma";
 import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
 import { getOrCreateUser } from "./userService";
+import { getMonthRangeFromMonthYear } from "../utils/dateRange";
 
 type SummaryCategory = { category: string; totalCents: number; total: number };
 type SummaryDay = { date: string; totalCents: number; total: number };
@@ -53,14 +54,13 @@ export async function getMonthlySummary(params: { userId: string; month: string 
     throw new Error('Parametro "month" invalido');
   }
 
-  const start = parsed.startOf("month");
-  const end = start.endOf("month");
+  const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
 
   const expenses = await prisma.expense.findMany({
     where: {
       userId: user.id,
       source: { not: "manual" },
-      date: { gte: start.toDate(), lte: end.toDate() },
+      date: { gte: start, lt: endExclusive },
     },
     include: { category: true },
   });
@@ -97,7 +97,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
       user.id,
       month,
       start.toISOString(),
-      end.toISOString(),
+      new Date(endExclusive.getTime() - 1).toISOString(),
       expenses.length,
       totalCents,
       salaryTotal,
@@ -108,8 +108,8 @@ export async function getMonthlySummary(params: { userId: string; month: string 
 
   return {
     month,
-    start: start.toDate(),
-    end: end.toDate(),
+    start: start,
+    end: new Date(endExclusive.getTime() - 1),
     expensesCount: expenses.length,
     totalCents,
     total: centsToNumber(totalCents),

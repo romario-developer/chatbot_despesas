@@ -1,16 +1,16 @@
 import { prisma } from '../db/prisma';
-import { getMonthRange } from '../utils/dates';
+import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 import { getOrCreateUser } from './userService';
 
 async function buildMonthlyReport(userId: number, month: number, year: number) {
-  const { start, end } = getMonthRange(month, year);
+  const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const expenses = await prisma.expense.findMany({
     where: {
       userId,
       date: {
         gte: start,
-        lte: end,
+        lt: endExclusive,
       },
     },
     include: { category: true },
@@ -51,7 +51,7 @@ async function buildMonthlyReport(userId: number, month: number, year: number) {
     categorySummary,
     topExpenses,
     start,
-    end,
+    end: new Date(endExclusive.getTime() - 1),
     expensesCount: expenses.length,
   };
 }
@@ -74,13 +74,13 @@ export async function getMonthlyExpensesPage(
   pageSize: number,
 ) {
   const user = await getOrCreateUser(telegramId);
-  const { start, end } = getMonthRange(month, year);
+  const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const where = {
     userId: user.id,
     date: {
       gte: start,
-      lte: end,
+      lt: endExclusive,
     },
   } as const;
 

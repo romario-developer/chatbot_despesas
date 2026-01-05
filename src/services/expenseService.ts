@@ -1,7 +1,7 @@
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { getOrCreateUser } from './userService';
-import { getMonthRange } from '../utils/dates';
+import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 
 export interface ParsedExpenseInput {
   amountCents: number;
@@ -107,12 +107,12 @@ export async function deleteExpense(telegramId: string, expenseId: number) {
 
 export async function deleteExpensesForMonth(telegramId: string, month: number, year: number) {
   const user = await getOrCreateUser(telegramId);
-  const { start, end } = getMonthRange(month, year);
+  const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const aggregate = await prisma.expense.aggregate({
     where: {
       userId: user.id,
-      date: { gte: start, lte: end },
+      date: { gte: start, lt: endExclusive },
     },
     _count: true,
     _sum: { amountCents: true },
@@ -121,7 +121,7 @@ export async function deleteExpensesForMonth(telegramId: string, month: number, 
   const deleted = await prisma.expense.deleteMany({
     where: {
       userId: user.id,
-      date: { gte: start, lte: end },
+      date: { gte: start, lt: endExclusive },
     },
   });
 
