@@ -101,6 +101,30 @@ curl -H "Authorization: Bearer $TOKEN" \
 - Tokens invalidos ou expirados sao recusados; rode `/reset_total` novamente para um novo desafio. O botao "Cancelar" remove o token sem apagar nada.
 - Nao ha endpoint HTTP para reset e o filtro sempre e por usuario (multiusuario seguro).
 
+## Backup / Reset / Restore (CLI)
+- Backup (gera JSON em `backups/backup-YYYYMMDDTHHMM.json`):
+  ```bash
+  npm run db:backup
+  ```
+- Backup (Render, usando build/dist):
+  ```bash
+  npm run db:backup:render
+  ```
+- Reset (apaga dados transacionais; em producao exige `RESET_CONFIRM=YES`):
+  ```bash
+  RESET_CONFIRM=YES npm run db:reset
+  ```
+- Restore (reimporta um backup para um banco vazio; rode reset antes):
+  ```bash
+  npm run db:restore -- --file backups/backup-YYYYMMDDTHHMM.json
+  ```
+- O backup inclui usuarios, categorias, despesas, rascunhos, planejamento, sessoes e codigos de link do Telegram. O restore preserva IDs e reajusta sequences.
+- Endpoint temporario para admin (requer `ADMIN_TOKEN`):
+  ```http
+  GET /api/admin/backup   (Authorization: Bearer <ADMIN_TOKEN>)
+  ```
+  Retorna o JSON do backup e loga o caminho do arquivo salvo (padrao `/tmp/backups` no Render). Use apenas para extração segura.
+
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.

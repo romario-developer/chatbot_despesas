@@ -13,7 +13,11 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "test": "echo \"No tests configured\" && exit 0"
+    "test": "echo \"No tests configured\" && exit 0",
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:reset": "tsx scripts/db-reset.ts",
+    "db:restore": "tsx scripts/db-restore.ts",
+    "db:backup:render": "node dist/scripts/db-backup.js"
   },
   "keywords": [],
   "author": "",

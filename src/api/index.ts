@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { authMiddleware } from './middleware/auth';
 import { noCacheMiddleware } from './middleware/noCache';
 import authRoutes from './routes/auth';
+import adminRoutes from './routes/admin';
 import categoriesRoutes from './routes/categories';
 import entriesRoutes from './routes/entries';
 import planningRoutes from './routes/planning';
@@ -18,6 +19,7 @@ router.get('/health', (_req, res) => {
 });
 
 router.use('/auth', authRoutes);
+router.use('/admin', adminRoutes);
 router.use('/telegram', telegramRoutes);
 
 router.use(authMiddleware);
