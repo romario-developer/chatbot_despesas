@@ -266,6 +266,7 @@ router.get("/telegram/links", async (req, res) => {
         telegramChatId: true,
         createdAt: true,
       },
+      where: { telegramChatId: { not: null } },
       orderBy: { createdAt: "desc" },
     });
 
@@ -388,6 +389,84 @@ router.get("/telegram/links/by-telegram-user/:telegramUserId", async (req, res) 
   } catch (err) {
     console.error("[admin][telegram/links/by-telegram-user] erro:", err);
     return res.status(500).json({ error: "Falha ao buscar vinculo" });
+  }
+});
+
+// Desvincular chatId
+router.post("/telegram/unlink", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const chatId = typeof req.body?.chatId === "number" ? req.body.chatId : Number(req.body?.chatId);
+  if (!Number.isFinite(chatId)) {
+    return res.status(400).json({ error: '"chatId" obrigatorio' });
+  }
+
+  try {
+    const user = await prisma.user.findFirst({ where: { telegramChatId: String(chatId) } });
+    if (!user) {
+      return res.status(404).json({ error: "Vinculo nao encontrado" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { telegramChatId: null },
+    });
+
+    return res.json({ ok: true, chatId: String(chatId) });
+  } catch (err) {
+    console.error("[admin][telegram/unlink] erro:", err);
+    return res.status(500).json({ error: "Falha ao desvincular" });
+  }
+});
+
+// Reapontar chatId para outro userId
+router.post("/telegram/relink", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const chatIdRaw = req.body?.chatId;
+  const newUserIdRaw = req.body?.newUserId;
+  const chatId = typeof chatIdRaw === "number" ? chatIdRaw : Number(chatIdRaw);
+  const newUserId = typeof newUserIdRaw === "number" ? newUserIdRaw : Number(newUserIdRaw);
+
+  if (!Number.isFinite(chatId)) {
+    return res.status(400).json({ error: '"chatId" obrigatorio' });
+  }
+  if (!Number.isInteger(newUserId) || newUserId <= 0) {
+    return res.status(400).json({ error: '"newUserId" deve ser inteiro > 0' });
+  }
+
+  try {
+    const target = await prisma.user.findUnique({ where: { id: newUserId } });
+    if (!target) {
+      return res.status(404).json({ error: "Usuario de destino nao encontrado" });
+    }
+
+    const existing = await prisma.user.findFirst({ where: { telegramChatId: String(chatId) } });
+    if (existing && existing.id !== target.id) {
+      await prisma.user.update({ where: { id: existing.id }, data: { telegramChatId: null } });
+    }
+
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { telegramChatId: String(chatId) },
+    });
+
+    return res.json({ ok: true, chatId: String(chatId), newUserId: target.id });
+  } catch (err) {
+    console.error("[admin][telegram/relink] erro:", err);
+    return res.status(500).json({ error: "Falha ao relink" });
   }
 });
 
