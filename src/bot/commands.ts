@@ -252,8 +252,7 @@ export async function handleRelatorioCommand(ctx: any) {
 
     const parts = [header, periodLine, countLine, totalLine, '', categoryBlock];
 
-    const message = parts.join('
-');
+    const message = parts.join('\n');
 
     await ctx.reply(message, { parse_mode: 'HTML', reply_markup: buildMenuKeyboard() });
   } catch (err) {
