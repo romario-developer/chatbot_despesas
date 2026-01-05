@@ -1,17 +1,21 @@
 import { Router } from "express";
 
+import { prisma } from "../../db/prisma";
 import { runBackup } from "../../services/backupService";
+import { getOrCreateUser } from "../../services/userService";
+import { normalizeCategoryName } from "../../utils/normalize";
+import { API_TELEGRAM_ID } from "../../utils/systemUsers";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 if (!ADMIN_TOKEN) {
-  console.warn("[admin] ADMIN_TOKEN não definido; /api/admin/backup ficará inativo.");
+  console.warn("[admin] ADMIN_TOKEN nÆo definido; /api/admin/backup ficar  inativo.");
 }
 
 const router = Router();
 
 router.get("/backup", async (req, res) => {
   if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: "ADMIN_TOKEN não configurado" });
+    return res.status(503).json({ error: "ADMIN_TOKEN nÆo configurado" });
   }
 
   const auth = req.headers.authorization;
@@ -29,6 +33,166 @@ router.get("/backup", async (req, res) => {
   } catch (err) {
     console.error("[admin][backup] falhou:", err);
     return res.status(500).json({ error: "Falha ao gerar backup" });
+  }
+});
+
+type MigrateResult = {
+  movedEntries: number;
+  movedDrafts: number;
+  movedCategories: number;
+  movedPlanning: number;
+  movedSessions: number;
+  oldUserId: number | null;
+  newUserId: number | null;
+};
+
+async function resolveUserByTelegramId(telegramId: string) {
+  return prisma.user.findFirst({
+    where: { OR: [{ telegramId }, { telegramChatId: telegramId }] },
+  });
+}
+
+async function migrateUserData(oldTelegramId: string, newTelegramId: string): Promise<MigrateResult> {
+  const oldUser = await resolveUserByTelegramId(oldTelegramId);
+  if (!oldUser) {
+    throw new Error(`Usuario antigo nao encontrado para telegramId="${oldTelegramId}"`);
+  }
+
+  const newUser = await getOrCreateUser(newTelegramId || API_TELEGRAM_ID);
+
+  if (oldUser.id === newUser.id) {
+    return {
+      movedEntries: 0,
+      movedDrafts: 0,
+      movedCategories: 0,
+      movedPlanning: 0,
+      movedSessions: 0,
+      oldUserId: oldUser.id,
+      newUserId: newUser.id,
+    };
+  }
+
+  // Map categories (idempotente)
+  const oldCategories = await prisma.category.findMany({ where: { userId: oldUser.id } });
+  let movedCategories = 0;
+  const categoryMap = new Map<number, number>();
+
+  for (const cat of oldCategories) {
+    const normalizedName = cat.normalizedName || normalizeCategoryName(cat.name);
+    const existing = await prisma.category.findFirst({
+      where: { userId: newUser.id, normalizedName },
+    });
+
+    let targetId = existing?.id;
+    if (!targetId) {
+      const created = await prisma.category.create({
+        data: {
+          userId: newUser.id,
+          name: cat.name,
+          normalizedName,
+        },
+      });
+      targetId = created.id;
+      movedCategories += 1;
+    }
+
+    categoryMap.set(cat.id, targetId);
+  }
+
+  let movedEntries = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expense.updateMany({
+      where: { userId: oldUser.id, categoryId: oldCatId },
+      data: { userId: newUser.id, categoryId: newCatId },
+    });
+    movedEntries += updated.count;
+  }
+
+  let movedDrafts = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expenseDraft.updateMany({
+      where: { userId: oldUser.id, categoryId: oldCatId },
+      data: { userId: newUser.id, categoryId: newCatId },
+    });
+    movedDrafts += updated.count;
+  }
+
+  let movedPlanning = 0;
+  const oldPlanning = await prisma.planning.findUnique({ where: { userId: oldUser.id } });
+  const newPlanning = await prisma.planning.findUnique({ where: { userId: newUser.id } });
+  if (oldPlanning && !newPlanning) {
+    await prisma.planning.update({
+      where: { userId: oldUser.id },
+      data: { userId: newUser.id },
+    });
+    movedPlanning = 1;
+  }
+
+  let movedSessions = 0;
+  const oldSession = await prisma.userSession.findUnique({ where: { userId: oldUser.id } });
+  if (oldSession) {
+    await prisma.userSession.upsert({
+      where: { userId: newUser.id },
+      create: {
+        userId: newUser.id,
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+      update: {
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+    });
+    await prisma.userSession.delete({ where: { userId: oldUser.id } });
+    movedSessions = 1;
+  }
+
+  await prisma.telegramLinkCode.updateMany({
+    where: { userId: oldUser.id },
+    data: { userId: newUser.id },
+  });
+
+  return {
+    movedEntries,
+    movedDrafts,
+    movedCategories,
+    movedPlanning,
+    movedSessions,
+    oldUserId: oldUser.id,
+    newUserId: newUser.id,
+  };
+}
+
+// TEMPORARIO: remover apos migracao concluida
+router.post("/migrate-user-data", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { oldTelegramId, newTelegramId } = req.body ?? {};
+  if (typeof oldTelegramId !== "string" || !oldTelegramId.trim()) {
+    return res.status(400).json({ error: '"oldTelegramId" obrigatorio' });
+  }
+  if (typeof newTelegramId !== "string" || !newTelegramId.trim()) {
+    return res.status(400).json({ error: '"newTelegramId" obrigatorio' });
+  }
+
+  try {
+    const result = await migrateUserData(oldTelegramId.trim(), newTelegramId.trim());
+    return res.json(result);
+  } catch (err) {
+    console.error("[admin][migrate-user-data] erro:", err);
+    const message = err instanceof Error ? err.message : "Falha na migracao";
+    return res.status(500).json({ error: message });
   }
 });
 

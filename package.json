@@ -17,7 +17,8 @@
     "db:backup": "tsx scripts/db-backup.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:restore": "tsx scripts/db-restore.ts",
-    "db:backup:render": "node dist/scripts/db-backup.js"
+    "db:backup:render": "node dist/scripts/db-backup.js",
+    "db:migrate-user-data": "tsx scripts/migrateUserData.ts"
   },
   "keywords": [],
   "author": "",

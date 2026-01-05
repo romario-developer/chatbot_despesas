@@ -125,6 +125,42 @@ curl -H "Authorization: Bearer $TOKEN" \
   ```
   Retorna o JSON do backup e loga o caminho do arquivo salvo (padrao `/tmp/backups` no Render). Use apenas para extração segura.
 
+### Admin temporario: migrar dados de usuario
+
+Endpoint temporario para consolidar dados de um usuario antigo (ex.: `admin`) para o usuario atual (ex.: `api-admin`). Requer `ADMIN_TOKEN` configurado.
+
+- `POST /api/admin/migrate-user-data`
+- Header: `x-admin-token: <ADMIN_TOKEN>`
+- Body JSON:
+  ```json
+  {
+    "oldTelegramId": "admin",
+    "newTelegramId": "api-admin"
+  }
+  ```
+- Resposta (exemplo):
+  ```json
+  {
+    "movedEntries": 12,
+    "movedDrafts": 0,
+    "movedCategories": 3,
+    "movedPlanning": 1,
+    "movedSessions": 1,
+    "oldUserId": 1,
+    "newUserId": 2
+  }
+  ```
+
+Exemplo curl (Insomnia similar):
+```
+curl -X POST https://<host>/api/admin/migrate-user-data \
+  -H "Content-Type: application/json" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -d '{"oldTelegramId":"admin","newTelegramId":"api-admin"}'
+```
+
+// Remover este endpoint apos concluir a migracao.
+
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.
