@@ -161,6 +161,23 @@ curl -X POST https://<host>/api/admin/migrate-user-data \
 
 // Remover este endpoint apos concluir a migracao.
 
+### Admin temporario: listar usuarios e migrar por ID
+
+- `GET /api/admin/users/with-counts`
+  - Header: `x-admin-token: <ADMIN_TOKEN>`
+  - Retorna lista de usuarios com contagens `{ id, telegramId, createdAt, entriesCount, planningCount }` ordenada por `entriesCount` desc.
+
+- `POST /api/admin/migrate-user-data-by-userid`
+  - Header: `x-admin-token: <ADMIN_TOKEN>`
+  - Body:
+    ```json
+    {
+      "oldUserId": 1,
+      "newTelegramId": "api-admin"
+    }
+    ```
+  - Usa `oldUserId` conhecido e migra para o usuario resolvido por `newTelegramId` (create se nao existir). Resposta traz contagens movidas.
+
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.

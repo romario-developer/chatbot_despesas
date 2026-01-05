@@ -46,6 +46,8 @@ type MigrateResult = {
   newUserId: number | null;
 };
 
+type MigrateByIdResult = MigrateResult;
+
 async function resolveUserByTelegramId(telegramId: string) {
   return prisma.user.findFirst({
     where: { OR: [{ telegramId }, { telegramChatId: telegramId }] },
@@ -191,6 +193,187 @@ router.post("/migrate-user-data", async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("[admin][migrate-user-data] erro:", err);
+    const message = err instanceof Error ? err.message : "Falha na migracao";
+    return res.status(500).json({ error: message });
+  }
+});
+
+// Lista usuarios com contagens para identificar quem possui despesas
+router.get("/users/with-counts", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const users = await prisma.user.findMany({
+      select: { id: true, telegramId: true, createdAt: true },
+    });
+
+    const withCounts = await Promise.all(
+      users.map(async (u) => {
+        const [entriesCount, planningCount] = await Promise.all([
+          prisma.expense.count({ where: { userId: u.id } }),
+          prisma.planning.count({ where: { userId: u.id } }),
+        ]);
+        return {
+          id: u.id,
+          telegramId: u.telegramId,
+          createdAt: u.createdAt,
+          entriesCount,
+          planningCount,
+        };
+      }),
+    );
+
+    withCounts.sort((a, b) => b.entriesCount - a.entriesCount);
+    return res.json(withCounts);
+  } catch (err) {
+    console.error("[admin][users/with-counts] erro:", err);
+    return res.status(500).json({ error: "Falha ao listar usuarios" });
+  }
+});
+
+async function migrateUserDataById(oldUserId: number, newTelegramId: string): Promise<MigrateByIdResult> {
+  const oldUser = await prisma.user.findUnique({ where: { id: oldUserId } });
+  if (!oldUser) {
+    throw new Error(`Usuario antigo nao encontrado para id=${oldUserId}`);
+  }
+
+  const newUser = await getOrCreateUser(newTelegramId || API_TELEGRAM_ID);
+  if (oldUser.id === newUser.id) {
+    return {
+      movedEntries: 0,
+      movedDrafts: 0,
+      movedCategories: 0,
+      movedPlanning: 0,
+      movedSessions: 0,
+      oldUserId: oldUser.id,
+      newUserId: newUser.id,
+    };
+  }
+
+  const oldCategories = await prisma.category.findMany({ where: { userId: oldUser.id } });
+  let movedCategories = 0;
+  const categoryMap = new Map<number, number>();
+
+  for (const cat of oldCategories) {
+    const normalizedName = cat.normalizedName || normalizeCategoryName(cat.name);
+    const existing = await prisma.category.findFirst({
+      where: { userId: newUser.id, normalizedName },
+    });
+
+    let targetId = existing?.id;
+    if (!targetId) {
+      const created = await prisma.category.create({
+        data: {
+          userId: newUser.id,
+          name: cat.name,
+          normalizedName,
+        },
+      });
+      targetId = created.id;
+      movedCategories += 1;
+    }
+
+    categoryMap.set(cat.id, targetId);
+  }
+
+  let movedEntries = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expense.updateMany({
+      where: { userId: oldUser.id, categoryId: oldCatId },
+      data: { userId: newUser.id, categoryId: newCatId },
+    });
+    movedEntries += updated.count;
+  }
+
+  let movedDrafts = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expenseDraft.updateMany({
+      where: { userId: oldUser.id, categoryId: oldCatId },
+      data: { userId: newUser.id, categoryId: newCatId },
+    });
+    movedDrafts += updated.count;
+  }
+
+  let movedPlanning = 0;
+  const oldPlanning = await prisma.planning.findUnique({ where: { userId: oldUser.id } });
+  const newPlanning = await prisma.planning.findUnique({ where: { userId: newUser.id } });
+  if (oldPlanning && !newPlanning) {
+    await prisma.planning.update({
+      where: { userId: oldUser.id },
+      data: { userId: newUser.id },
+    });
+    movedPlanning = 1;
+  }
+
+  let movedSessions = 0;
+  const oldSession = await prisma.userSession.findUnique({ where: { userId: oldUser.id } });
+  if (oldSession) {
+    await prisma.userSession.upsert({
+      where: { userId: newUser.id },
+      create: {
+        userId: newUser.id,
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+      update: {
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+    });
+    await prisma.userSession.delete({ where: { userId: oldUser.id } });
+    movedSessions = 1;
+  }
+
+  await prisma.telegramLinkCode.updateMany({
+    where: { userId: oldUser.id },
+    data: { userId: newUser.id },
+  });
+
+  return {
+    movedEntries,
+    movedDrafts,
+    movedCategories,
+    movedPlanning,
+    movedSessions,
+    oldUserId: oldUser.id,
+    newUserId: newUser.id,
+  };
+}
+
+// TEMPORARIO: migrar por userId conhecido
+router.post("/migrate-user-data-by-userid", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { oldUserId, newTelegramId } = req.body ?? {};
+  if (!Number.isInteger(oldUserId) || oldUserId <= 0) {
+    return res.status(400).json({ error: '"oldUserId" deve ser inteiro > 0' });
+  }
+  if (typeof newTelegramId !== "string" || !newTelegramId.trim()) {
+    return res.status(400).json({ error: '"newTelegramId" obrigatorio' });
+  }
+
+  try {
+    const result = await migrateUserDataById(oldUserId, newTelegramId.trim());
+    return res.json(result);
+  } catch (err) {
+    console.error("[admin][migrate-user-data-by-userid] erro:", err);
     const message = err instanceof Error ? err.message : "Falha na migracao";
     return res.status(500).json({ error: message });
   }
