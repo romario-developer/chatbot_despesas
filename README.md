@@ -93,9 +93,12 @@ curl -H "Authorization: Bearer $TOKEN" \
 ### Export CSV (Admin)
 - Endpoint protegido por `x-admin-token: <ADMIN_TOKEN>`.
 - `GET /api/admin/exports/expenses.csv?month=YYYY-MM&from=YYYY-MM-DD&to=YYYY-MM-DD&source=...&category=...`
-  - `month` preferencial; se presente ignora `from/to`.
+  - `month` preferencial; se presente ignora `from/to`. Se nenhum filtro vier, usa o mes atual por padrao.
   - `source`/`category` opcionais (filtro contem, case-insensitive).
+  - Limite: 10.000 itens (retorna 413 se exceder).
   - Exporta item a item com colunas `date,description,category,amount,source` (data YYYY-MM-DD, amount em reais).
+  - Headers: `Content-Type: text/csv; charset=utf-8`, `Cache-Control: no-store`.
+  - Exemplo: `/api/admin/exports/expenses.csv?month=2026-01`
 
 ## Telegram (bot)
 - Crie o bot com o BotFather e defina `BOT_TOKEN`.

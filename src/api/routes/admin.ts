@@ -13,6 +13,7 @@ if (!ADMIN_TOKEN) {
   console.warn("[admin] ADMIN_TOKEN nao definido; /api/admin/backup ficara inativo.");
 }
 
+const MAX_EXPORT_ITEMS = 10_000;
 const router = Router();
 
 function requireAdminToken(req: any, res: any) {
@@ -343,27 +344,35 @@ router.get("/exports/expenses.csv", async (req, res) => {
   const adminUser = await getAdminUser();
   const where: any = { userId: adminUser.id };
 
+  let periodLabel = "current_month";
   if (month) {
     const match = month.match(/^(\d{4})-(\d{2})$/);
     if (!match) {
-      return res.status(400).json({ error: 'month deve ser YYYY-MM' });
+      return res.status(400).json({ error: "month deve ser YYYY-MM" });
     }
     const year = Number(match[1]);
     const m = Number(match[2]);
     const { start, endExclusive } = getMonthRangeFromMonthYear(m, year, TZ);
     where.date = { gte: start, lt: endExclusive };
-  } else {
+    periodLabel = month;
+  } else if (fromStr || toStr) {
     if (fromStr) {
-      const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ);
-      if (!from.isValid()) return res.status(400).json({ error: 'from invalido (YYYY-MM-DD)' });
+      const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ).startOf("day");
+      if (!from.isValid()) return res.status(400).json({ error: "from invalido (YYYY-MM-DD)" });
       where.date = { ...(where.date || {}), gte: from.toDate() };
     }
     if (toStr) {
-      const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ);
-      if (!to.isValid()) return res.status(400).json({ error: 'to invalido (YYYY-MM-DD)' });
+      const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ).startOf("day");
+      if (!to.isValid()) return res.status(400).json({ error: "to invalido (YYYY-MM-DD)" });
       const end = to.add(1, "day");
       where.date = { ...(where.date || {}), lt: end.toDate() };
     }
+    periodLabel = fromStr && toStr ? `${fromStr}_to_${toStr}` : fromStr || toStr || periodLabel;
+  } else {
+    const now = dayjs.tz(TZ);
+    const { start, endExclusive } = getMonthRangeFromMonthYear(now.month() + 1, now.year(), TZ);
+    where.date = { gte: start, lt: endExclusive };
+    periodLabel = now.format("YYYY-MM");
   }
 
   if (source) {
@@ -377,23 +386,35 @@ router.get("/exports/expenses.csv", async (req, res) => {
     const expenses = await prisma.expense.findMany({
       where,
       include: { category: true },
-      orderBy: { date: "asc" },
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      take: MAX_EXPORT_ITEMS + 1,
     });
 
-    const periodLabel = month || (fromStr && toStr ? `${fromStr}_to_${toStr}` : fromStr || toStr || "all");
+    if (expenses.length > MAX_EXPORT_ITEMS) {
+      return res
+        .status(413)
+        .json({ error: "Export excede o limite. Filtre por mes ou intervalo menor." });
+    }
+
     const header = "date,description,category,amount,source";
+    const escapeCsv = (value: string) => `"${(value || "").replace(/\"/g, '""')}"`;
+
     const lines = expenses.map((e) => {
       const date = e.date.toISOString().slice(0, 10);
-      const description = (e.description || "").replace(/"/g, '""');
-      const categoryName = (e.category?.name || "").replace(/"/g, '""');
+      const description = escapeCsv(e.description || "");
+      const categoryName = escapeCsv(e.category?.name || "");
       const amount = ((e.amountCents ?? 0) / 100).toFixed(2);
-      const src = (e.source || "").replace(/"/g, '""');
-      return `${date},"${description}","${categoryName}",${amount},${src}`;
+      const src = escapeCsv(e.source || "");
+      return `${date},${description},${categoryName},${amount},${src}`;
     });
 
     const csv = [header, ...lines].join("\n");
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="expenses_${periodLabel}.csv"`);
+    res.setHeader("Cache-Control", "no-store");
+
+    console.log("[EXPORT_CSV]", { userId: adminUser.id, period: periodLabel, count: expenses.length });
+
     return res.status(200).send(csv);
   } catch (err) {
     console.error("[admin][exports/expenses.csv] erro:", err);
