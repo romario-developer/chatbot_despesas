@@ -945,4 +945,21 @@ router.get("/debug/expense-users", async (req, res) => {
   }
 });
 
+router.get("/debug/whoami", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const adminUser = await getAdminUser();
+    return res.json({ sub: "admin", userId: adminUser.id });
+  } catch (err) {
+    return res.status(500).json({ error: "Falha ao resolver usuario admin" });
+  }
+});
+
 export default router;
