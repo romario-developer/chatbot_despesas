@@ -59,11 +59,10 @@ export async function getMonthlySummary(params: { userId: string; month: string 
 
   const where = {
     userId: user.id,
-    source: { not: "manual" },
     date: { gte: start, lt: endExclusive },
   } as const;
 
-  const [expenses, totalsAgg] = await Promise.all([
+  const [expenses, totalsAgg, totalsBySource] = await Promise.all([
     prisma.expense.findMany({
       where,
       include: { category: true },
@@ -72,6 +71,12 @@ export async function getMonthlySummary(params: { userId: string; month: string 
       where,
       _sum: { amountCents: true },
       _count: { _all: true },
+    }),
+    prisma.expense.groupBy({
+      where,
+      by: ["source"],
+      _count: { _all: true },
+      _sum: { amountCents: true },
     }),
   ]);
 
@@ -102,7 +107,12 @@ export async function getMonthlySummary(params: { userId: string; month: string 
   const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
 
   console.log("[monthly-summary]", { userId: user.id, month });
-  console.log("SUMMARY", { userId: user.id, month, totalExpenses });
+  console.log("SUMMARY", {
+    userId: user.id,
+    month,
+    totalExpenses,
+    countBySource: totalsBySource.map((s) => ({ source: s.source, count: s._count._all, cents: s._sum.amountCents })),
+  });
 
   if (process.env.NODE_ENV !== "production") {
     console.log(
