@@ -880,4 +880,34 @@ router.get("/reports/compare-all-months", async (req, res) => {
   }
 });
 
+router.get("/debug/user-ids", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const rows = await prisma.expense.groupBy({
+      by: ["userId"],
+      _count: true,
+      _sum: { amountCents: true },
+      orderBy: { userId: "asc" },
+    });
+
+    return res.json(
+      rows.map((r) => ({
+        userId: r.userId,
+        count: r._count,
+        amountCents: r._sum.amountCents ?? 0,
+      })),
+    );
+  } catch (err) {
+    console.error("[admin][debug/user-ids] erro:", err);
+    return res.status(500).json({ error: "Falha ao listar userIds" });
+  }
+});
+
 export default router;
