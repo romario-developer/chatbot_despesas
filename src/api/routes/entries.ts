@@ -52,7 +52,11 @@ router.get("/", async (req: AuthedRequest, res) => {
   const { from, to, category, q } = req.query;
 
   const filters: Prisma.ExpenseWhereInput[] = [];
-  filters.push({ userId: user.id, source: { not: "manual" } });
+  filters.push({ userId: user.id });
+
+  if (typeof req.query.source === "string" && req.query.source.trim()) {
+    filters.push({ source: req.query.source.trim() });
+  }
 
   const { start, endExclusive, error } = parseFromToQuery(
     typeof from === "string" ? from : undefined,
