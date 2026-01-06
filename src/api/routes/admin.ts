@@ -910,4 +910,39 @@ router.get("/debug/user-ids", async (req, res) => {
   }
 });
 
+router.get("/debug/expense-users", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const rows = await prisma.expense.groupBy({
+      by: ["userId"],
+      _count: true,
+      _sum: { amountCents: true },
+      _min: { date: true },
+      _max: { date: true },
+    });
+
+    const mapped = rows
+      .map((r) => ({
+        userId: r.userId,
+        count: r._count,
+        sumCents: r._sum.amountCents ?? 0,
+        minDate: r._min.date ? new Date(r._min.date) : null,
+        maxDate: r._max.date ? new Date(r._max.date) : null,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return res.json(mapped);
+  } catch (err) {
+    console.error("[admin][debug/expense-users] erro:", err);
+    return res.status(500).json({ error: "Falha ao listar despesas por usuario" });
+  }
+});
+
 export default router;
