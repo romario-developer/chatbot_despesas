@@ -6,6 +6,7 @@ import type { NextFunction, Request, Response } from "express";
 import apiRouter, { API_BASE_PATH } from "./api";
 import { bot } from "./bot/botInstance";
 import "./utils/dates";
+import { prisma } from "./db/prisma";
 
 dotenv.config();
 process.env.TZ = "America/Fortaleza";
@@ -161,10 +162,26 @@ startWebhookOrPolling().catch((err) => {
 });
 
 async function startWebhookOrPolling() {
+  await logExpenseUsers();
   if (IS_RENDER) {
     await startWebhook();
   } else {
     await startPolling();
+  }
+}
+
+async function logExpenseUsers() {
+  try {
+    const rows = await prisma.expense.groupBy({
+      by: ["userId"],
+      _count: true,
+    });
+    console.log("[DEBUG][EXPENSE USERS]");
+    rows.forEach((row) => {
+      console.log(`userId=${row.userId} count=${row._count}`);
+    });
+  } catch (err) {
+    console.error("[DEBUG][EXPENSE USERS] falhou:", err);
   }
 }
 
