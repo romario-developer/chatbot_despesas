@@ -22,6 +22,7 @@
     "db:migrate-user-data": "tsx scripts/migrateUserData.ts",
     "db:migrate-telegram-admin": "tsx scripts/migrateTelegramExpensesToAdmin.ts",
     "db:migrate-user-to-admin": "tsx scripts/migrateUserDataToAdmin.ts",
+    "db:migrate-all-to-admin": "tsx scripts/migrateAllToAdmin.ts",
     "verify:date-range": "tsx scripts/verifyDateRanges.ts"
   },
   "keywords": [],
