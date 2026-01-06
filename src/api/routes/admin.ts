@@ -2,20 +2,20 @@ import { Router } from "express";
 
 import { prisma } from "../../db/prisma";
 import { runBackup } from "../../services/backupService";
-import { getOrCreateUser } from "../../services/userService";
+import { getOrCreateUser, getAdminUser } from "../../services/userService";
 import { normalizeCategoryName } from "../../utils/normalize";
 import { API_TELEGRAM_ID } from "../../utils/systemUsers";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 if (!ADMIN_TOKEN) {
-  console.warn("[admin] ADMIN_TOKEN nÆo definido; /api/admin/backup ficar  inativo.");
+  console.warn("[admin] ADMIN_TOKEN n’o definido; /api/admin/backup ficarÿ inativo.");
 }
 
 const router = Router();
 
 router.get("/backup", async (req, res) => {
   if (!ADMIN_TOKEN) {
-    return res.status(503).json({ error: "ADMIN_TOKEN nÆo configurado" });
+    return res.status(503).json({ error: "ADMIN_TOKEN n’o configurado" });
   }
 
   const auth = req.headers.authorization;
@@ -36,6 +36,50 @@ router.get("/backup", async (req, res) => {
   }
 });
 
+router.get("/debug/user-data-summary", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN n’o configurado" });
+  }
+  const auth = req.headers.authorization;
+  const token = auth?.replace(/^Bearer /i, "").trim();
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const [expensesTotal, expensesByUserId, planning] = await Promise.all([
+      prisma.expense.count(),
+      prisma.expense.groupBy({
+        by: ["userId"],
+        _count: true,
+        _sum: { amountCents: true },
+      }),
+      prisma.planning.findMany({ select: { userId: true, data: true } }),
+    ]);
+
+    const planningByUserId = planning.map((p) => {
+      const salaryByMonth = (p.data as any)?.salaryByMonth ?? {};
+      const salaryTotal = Object.values(salaryByMonth).reduce((sum: number, val: any) => {
+        const num = typeof val === "number" ? val : Number(val);
+        return Number.isFinite(num) ? sum + num : sum;
+      }, 0);
+      return { userId: p.userId, salaryTotal };
+    });
+
+    return res.json({
+      expensesTotal,
+      expensesByUserId: expensesByUserId.map((row) => ({
+        userId: row.userId,
+        count: row._count,
+        amountCents: row._sum.amountCents ?? 0,
+      })),
+      planningByUserId,
+    });
+  } catch (err) {
+    console.error("[admin][debug/user-data-summary] erro:", err);
+    return res.status(500).json({ error: "Falha ao coletar dados" });
+  }
+});
 type MigrateResult = {
   movedEntries: number;
   movedDrafts: number;
@@ -63,6 +107,127 @@ async function resolveUserByTelegramId(telegramId: string) {
   return prisma.user.findFirst({
     where: { OR: [{ telegramId }, { telegramChatId: telegramId }] },
   });
+}
+
+async function migrateUserDataToTarget(oldUserId: number, newUserId: number) {
+  if (oldUserId === newUserId) {
+    return {
+      movedEntries: 0,
+      movedDrafts: 0,
+      movedCategories: 0,
+      movedPlanning: 0,
+      movedSessions: 0,
+      oldUserId,
+      newUserId,
+    };
+  }
+
+  const oldCategories = await prisma.category.findMany({ where: { userId: oldUserId } });
+  let movedCategories = 0;
+  const categoryMap = new Map<number, number>();
+
+  for (const cat of oldCategories) {
+    const normalizedName = cat.normalizedName || normalizeCategoryName(cat.name);
+    const existing = await prisma.category.findFirst({
+      where: { userId: newUserId, normalizedName },
+    });
+
+    let targetId = existing?.id;
+    if (!targetId) {
+      const created = await prisma.category.create({
+        data: {
+          userId: newUserId,
+          name: cat.name,
+          normalizedName,
+        },
+      });
+      targetId = created.id;
+      movedCategories += 1;
+    }
+
+    categoryMap.set(cat.id, targetId);
+  }
+
+  let movedEntries = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expense.updateMany({
+      where: { userId: oldUserId, categoryId: oldCatId },
+      data: { userId: newUserId, categoryId: newCatId },
+    });
+    movedEntries += updated.count;
+  }
+
+  let movedDrafts = 0;
+  for (const [oldCatId, newCatId] of categoryMap.entries()) {
+    const updated = await prisma.expenseDraft.updateMany({
+      where: { userId: oldUserId, categoryId: oldCatId },
+      data: { userId: newUserId, categoryId: newCatId },
+    });
+    movedDrafts += updated.count;
+  }
+
+  let movedPlanning = 0;
+  const oldPlanning = await prisma.planning.findUnique({ where: { userId: oldUserId } });
+  const newPlanning = await prisma.planning.findUnique({ where: { userId: newUserId } });
+  if (oldPlanning) {
+    if (newPlanning) {
+      const oldData = typeof oldPlanning.data === "object" && oldPlanning.data ? (oldPlanning.data as any) : {};
+      const newData = typeof newPlanning.data === "object" && newPlanning.data ? (newPlanning.data as any) : {};
+      // merge basic fields favoring target, but keep old data as fallback
+      await prisma.planning.update({
+        where: { id: newPlanning.id },
+        data: {
+          data: { ...oldData, ...newData },
+        },
+      });
+      movedPlanning = 1;
+      await prisma.planning.delete({ where: { userId: oldUserId } }).catch(() => {});
+    } else {
+      await prisma.planning.update({
+        where: { userId: oldUserId },
+        data: { userId: newUserId },
+      });
+      movedPlanning = 1;
+    }
+  }
+
+  let movedSessions = 0;
+  const oldSession = await prisma.userSession.findUnique({ where: { userId: oldUserId } });
+  if (oldSession) {
+    await prisma.userSession.upsert({
+      where: { userId: newUserId },
+      create: {
+        userId: newUserId,
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+      update: {
+        mode: oldSession.mode,
+        draftId: oldSession.draftId,
+        resetToken: oldSession.resetToken,
+        resetTokenExpiresAt: oldSession.resetTokenExpiresAt,
+      },
+    });
+    await prisma.userSession.delete({ where: { userId: oldUserId } }).catch(() => {});
+    movedSessions = 1;
+  }
+
+  await prisma.telegramLinkCode.updateMany({
+    where: { userId: oldUserId },
+    data: { userId: newUserId },
+  });
+
+  return {
+    movedEntries,
+    movedDrafts,
+    movedCategories,
+    movedPlanning,
+    movedSessions,
+    oldUserId,
+    newUserId,
+  };
 }
 
 async function migrateUserData(oldTelegramId: string, newTelegramId: string): Promise<MigrateResult> {
@@ -607,6 +772,32 @@ router.post("/migrate-user-data-by-userid", async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("[admin][migrate-user-data-by-userid] erro:", err);
+    const message = err instanceof Error ? err.message : "Falha na migracao";
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.post("/migrate-user-to-admin", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { fromUserId } = req.body ?? {};
+  if (!Number.isInteger(fromUserId) || fromUserId <= 0) {
+    return res.status(400).json({ error: '"fromUserId" deve ser inteiro > 0' });
+  }
+
+  try {
+    const adminUser = await getAdminUser();
+    const result = await migrateUserDataToTarget(fromUserId, adminUser.id);
+    return res.json(result);
+  } catch (err) {
+    console.error("[admin][migrate-user-to-admin] erro:", err);
     const message = err instanceof Error ? err.message : "Falha na migracao";
     return res.status(500).json({ error: message });
   }

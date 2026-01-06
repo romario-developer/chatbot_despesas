@@ -21,6 +21,7 @@
     "db:backup:render": "node dist/scripts/db-backup.js",
     "db:migrate-user-data": "tsx scripts/migrateUserData.ts",
     "db:migrate-telegram-admin": "tsx scripts/migrateTelegramExpensesToAdmin.ts",
+    "db:migrate-user-to-admin": "tsx scripts/migrateUserDataToAdmin.ts",
     "verify:date-range": "tsx scripts/verifyDateRanges.ts"
   },
   "keywords": [],
