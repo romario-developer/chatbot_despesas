@@ -22,6 +22,8 @@ import { setSession, clearSession } from '../services/sessionService';
 import { generateResetToken } from '../services/resetService';
 import { prisma } from '../db/prisma';
 import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
+import { parseExpenseText } from '../services/parseExpenseText';
+import { createDraftFromParsed, confirmDraft } from '../services/draftService';
 
 const BOT_USER_KEY = ADMIN_TELEGRAM_ID;
 
@@ -591,6 +593,38 @@ export function registerCommandHandlers(bot: Bot) {
 
   bot.command('despesas', async (ctx) => {
     await handleDespesasCommand(ctx);
+  });
+
+  bot.command('despesa', async (ctx) => {
+    try {
+      requireTelegramId(ctx);
+      const input = (ctx.match as string | undefined)?.trim() ?? '';
+      if (!input) {
+        await ctx.reply('Use: /despesa VALOR descricao [DATA opcional DD/MM ou DD/MM/AAAA]', {
+          reply_markup: buildMenuKeyboard(),
+        });
+        return;
+      }
+
+      const parsed = parseExpenseText(input);
+      const { draft } = await createDraftFromParsed(BOT_USER_KEY, parsed);
+      const confirmed = await confirmDraft(draft.id, BOT_USER_KEY);
+      if (!confirmed) {
+        await ctx.reply('NÆo consegui salvar a despesa.', { reply_markup: buildMenuKeyboard() });
+        return;
+      }
+
+      await ctx.reply(
+        `Despesa registrada em ${formatDate(confirmed.expense.date)}: ${formatCurrency(confirmed.expense.amountCents)} - ${confirmed.expense.description} (ID #${confirmed.expense.id})`,
+        { reply_markup: buildMenuKeyboard() },
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'NÆo consegui registrar. Reenvie como: /despesa VALOR descricao [DATA opcional DD/MM ou DD/MM/AAAA].';
+      await ctx.reply(message, { reply_markup: buildMenuKeyboard() });
+    }
   });
 
   bot.command('editar', async (ctx) => {
