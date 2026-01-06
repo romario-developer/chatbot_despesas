@@ -803,4 +803,81 @@ router.post("/migrate-user-to-admin", async (req, res) => {
   }
 });
 
+router.get("/reports/compare-all-months", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const fromUserIdRaw = req.query.fromUserId;
+  const fromUserId =
+    typeof fromUserIdRaw === "string" && fromUserIdRaw.trim()
+      ? Number(fromUserIdRaw.trim())
+      : Number(fromUserIdRaw);
+  if (!Number.isInteger(fromUserId) || fromUserId <= 0) {
+    return res.status(400).json({ error: '"fromUserId" deve ser inteiro > 0' });
+  }
+
+  try {
+    const adminUser = await getAdminUser();
+    const adminId = adminUser.id;
+
+    const rows = await prisma.$queryRaw<
+      { month: string; userId: number; count: bigint; total: bigint | null }[]
+    >`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', "date" AT TIME ZONE 'America/Bahia'), 'YYYY-MM') AS month,
+        "userId",
+        COUNT(*)::bigint AS count,
+        SUM("amountCents")::bigint AS total
+      FROM "Expense"
+      WHERE "userId" IN (${fromUserId}, ${adminId})
+      GROUP BY month, "userId"
+      ORDER BY month ASC
+    `;
+
+    const months = new Set<string>();
+    const map = new Map<string, { old_count: number; old_total: number; current_count: number; current_total: number }>();
+
+    rows.forEach((row) => {
+      months.add(row.month);
+      const key = row.month;
+      const entry =
+        map.get(key) ?? { old_count: 0, old_total: 0, current_count: 0, current_total: 0 };
+      if (row.userId === fromUserId) {
+        entry.old_count = Number(row.count ?? 0);
+        entry.old_total = Number(row.total ?? 0);
+      } else if (row.userId === adminId) {
+        entry.current_count = Number(row.count ?? 0);
+        entry.current_total = Number(row.total ?? 0);
+      }
+      map.set(key, entry);
+    });
+
+    const header = "month,old_count,old_total,current_count,current_total";
+    const lines = Array.from(months)
+      .sort()
+      .map((month) => {
+        const data = map.get(month) ?? {
+          old_count: 0,
+          old_total: 0,
+          current_count: 0,
+          current_total: 0,
+        };
+        return [month, data.old_count, data.old_total, data.current_count, data.current_total].join(",");
+      });
+
+    const csv = [header, ...lines].join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename=compare-${fromUserId}-vs-admin.csv`);
+    return res.status(200).send(csv);
+  } catch (err) {
+    console.error("[admin][reports/compare-all-months] erro:", err);
+    return res.status(500).json({ error: "Falha ao gerar relatorio" });
+  }
+});
+
 export default router;
