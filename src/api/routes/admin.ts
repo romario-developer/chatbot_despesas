@@ -962,4 +962,59 @@ router.get("/debug/whoami", async (req, res) => {
   }
 });
 
+router.get("/reports/export-expenses", async (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+  }
+  const token = req.headers["x-admin-token"];
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const userIdRaw = req.query.userId;
+  const userId = typeof userIdRaw === "string" ? Number(userIdRaw) : Number(userIdRaw);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: '"userId" obrigatorio e deve ser inteiro > 0' });
+  }
+
+  const fromStr = typeof req.query.from === "string" ? req.query.from.trim() : "";
+  const toStr = typeof req.query.to === "string" ? req.query.to.trim() : "";
+
+  const filters: any = { userId };
+  if (fromStr) {
+    filters.date = { ...(filters.date || {}), gte: new Date(fromStr) };
+  }
+  if (toStr) {
+    const end = new Date(toStr);
+    end.setDate(end.getDate() + 1);
+    filters.date = { ...(filters.date || {}), lt: end };
+  }
+
+  try {
+    const expenses = await prisma.expense.findMany({
+      where: filters,
+      include: { category: true },
+      orderBy: { date: "asc" },
+    });
+
+    const header = "date,description,category,amount,source,userId";
+    const lines = expenses.map((e) => {
+      const date = e.date.toISOString().slice(0, 10);
+      const description = (e.description || "").replace(/"/g, '""');
+      const category = (e.category?.name || "").replace(/"/g, '""');
+      const amount = (e.amountCents ?? 0) / 100;
+      const source = (e.source || "").replace(/"/g, '""');
+      return `${date},"${description}","${category}",${amount},${source},${e.userId}`;
+    });
+
+    const csv = [header, ...lines].join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="expenses_${userId}.csv"`);
+    return res.status(200).send(csv);
+  } catch (err) {
+    console.error("[admin][reports/export-expenses] erro:", err);
+    return res.status(500).json({ error: "Falha ao exportar despesas" });
+  }
+});
+
 export default router;
