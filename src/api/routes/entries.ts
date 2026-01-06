@@ -8,28 +8,9 @@ import { AuthedRequest } from "../middleware/auth";
 import { resolveAuthUserId } from "../utils/authUser";
 import { getOrCreateUser } from "../../services/userService";
 import { getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
+import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
 
 const router = Router();
-
-function centsToNumber(cents: number) {
-  return Number((cents / 100).toFixed(2));
-}
-
-function parseAmountToCents(amount: unknown): number | null {
-  if (typeof amount === "number") {
-    if (!Number.isFinite(amount)) return null;
-    return Math.round(amount * 100);
-  }
-
-  if (typeof amount === "string") {
-    const normalized = amount.replace(",", ".").trim();
-    const parsed = Number.parseFloat(normalized);
-    if (!Number.isFinite(parsed)) return null;
-    return Math.round(parsed * 100);
-  }
-
-  return null;
-}
 
 function parseDateOnly(dateStr: unknown): Date | null {
   if (typeof dateStr !== "string") return null;
@@ -48,9 +29,10 @@ function mapExpense(expense: {
   createdAt: Date;
   category: { name: string };
 }) {
+  const amountCents = assertValidAmountCents(expense.amountCents, "expense.amountCents", { allowZero: true });
   return {
     id: expense.id,
-    amount: centsToNumber(expense.amountCents),
+    amount: centsToNumber(amountCents),
     description: expense.description,
     category: expense.category.name,
     date: dayjs(expense.date).tz(TZ).format("YYYY-MM-DD"),
@@ -141,7 +123,7 @@ router.post("/", async (req: AuthedRequest, res) => {
 
   const { amount, description, category, date } = req.body ?? {};
 
-  const amountCents = parseAmountToCents(amount);
+  const amountCents = toAmountCents(amount);
   if (!amountCents || amountCents <= 0) {
     return res.status(400).json({ error: "amount deve ser maior que zero" });
   }
@@ -204,7 +186,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   const data: Prisma.ExpenseUpdateInput = {};
 
   if (typeof amount !== "undefined") {
-    const amountCents = parseAmountToCents(amount);
+    const amountCents = toAmountCents(amount);
     if (!amountCents || amountCents <= 0) {
       return res.status(400).json({ error: "amount deve ser maior que zero" });
     }

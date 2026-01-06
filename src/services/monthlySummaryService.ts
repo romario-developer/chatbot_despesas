@@ -3,6 +3,7 @@ import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
 import { getOrCreateUser } from "./userService";
 import { getMonthRangeFromMonthYear } from "../utils/dateRange";
+import { assertValidAmountCents, centsToNumber } from "../utils/money";
 
 type SummaryCategory = { category: string; totalCents: number; total: number };
 type SummaryDay = { date: string; totalCents: number; total: number };
@@ -56,27 +57,39 @@ export async function getMonthlySummary(params: { userId: string; month: string 
 
   const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
 
-  const expenses = await prisma.expense.findMany({
-    where: {
-      userId: user.id,
-      source: { not: "manual" },
-      date: { gte: start, lt: endExclusive },
-    },
-    include: { category: true },
-  });
+  const where = {
+    userId: user.id,
+    source: { not: "manual" },
+    date: { gte: start, lt: endExclusive },
+  } as const;
 
-  let totalCents = 0;
+  const [expenses, totalsAgg] = await Promise.all([
+    prisma.expense.findMany({
+      where,
+      include: { category: true },
+    }),
+    prisma.expense.aggregate({
+      where,
+      _sum: { amountCents: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const expensesCount = totalsAgg._count?._all ?? 0;
+  const totalCents = totalsAgg._sum.amountCents ?? 0;
   const totalPorCategoria = new Map<string, number>();
   const totalPorDia = new Map<string, number>();
 
   for (const expense of expenses) {
-    totalCents += expense.amountCents;
+    const amountCents = assertValidAmountCents(expense.amountCents, `expense#${expense.id}.amountCents`, {
+      allowZero: true,
+    });
 
     const catKey = expense.category.name;
-    totalPorCategoria.set(catKey, (totalPorCategoria.get(catKey) ?? 0) + expense.amountCents);
+    totalPorCategoria.set(catKey, (totalPorCategoria.get(catKey) ?? 0) + amountCents);
 
     const dateKey = dayjs(expense.date).tz(TZ).format("YYYY-MM-DD");
-    totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + expense.amountCents);
+    totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + amountCents);
   }
 
   const planning = await getPlanningByUserId(user.id);
@@ -98,7 +111,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
       month,
       start.toISOString(),
       new Date(endExclusive.getTime() - 1).toISOString(),
-      expenses.length,
+      expensesCount,
       totalCents,
       salaryTotal,
       extrasTotal,
@@ -110,7 +123,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
     month,
     start: start,
     end: new Date(endExclusive.getTime() - 1),
-    expensesCount: expenses.length,
+    expensesCount,
     totalCents,
     total: centsToNumber(totalCents),
     totalExpenses,
@@ -130,8 +143,4 @@ export async function getMonthlySummary(params: { userId: string; month: string 
     balance,
     forecastBalance,
   };
-}
-
-function centsToNumber(cents: number) {
-  return Number((cents / 100).toFixed(2));
 }

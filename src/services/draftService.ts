@@ -2,17 +2,19 @@ import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { getOrCreateUser } from './userService';
 import { ParsedExpense } from './parseExpenseText';
+import { assertValidAmountCents } from '../utils/money';
 
 export async function createDraftFromParsed(telegramId: string, parsed: ParsedExpense) {
   const user = await getOrCreateUser(telegramId);
   await ensureDefaultCategory(user.id);
   const category = await getOrCreateCategory(user.id, parsed.categoryName || 'Outros');
+  const amountCents = assertValidAmountCents(parsed.amountCents, 'draft.amountCents');
 
   const draft = await prisma.expenseDraft.create({
     data: {
       userId: user.id,
       categoryId: category.id,
-      amountCents: parsed.amountCents,
+      amountCents,
       description: parsed.description || 'Sem descrição',
       date: parsed.date,
       rawText: parsed.rawText,
@@ -45,9 +47,14 @@ export async function updateDraft(
   const { draft, user } = await getDraftForUser(draftId, telegramId);
   if (!draft) return null;
 
+  const dataToUpdate = { ...data };
+  if (typeof data.amountCents !== 'undefined') {
+    dataToUpdate.amountCents = assertValidAmountCents(data.amountCents, 'draft.amountCents');
+  }
+
   const updated = await prisma.expenseDraft.update({
     where: { id: draft.id },
-    data,
+    data: dataToUpdate,
     include: { category: true },
   });
 
@@ -64,12 +71,13 @@ export async function deleteDraft(draftId: string, telegramId: string) {
 export async function confirmDraft(draftId: string, telegramId: string) {
   const { draft, user } = await getDraftForUser(draftId, telegramId);
   if (!draft) return null;
+  const amountCents = assertValidAmountCents(draft.amountCents, 'draft.amountCents');
 
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
       categoryId: draft.categoryId,
-      amountCents: draft.amountCents,
+      amountCents,
       description: draft.description,
       date: draft.date,
       source: 'telegram-text',

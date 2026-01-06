@@ -2,6 +2,7 @@ import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { getOrCreateUser } from './userService';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
+import { assertValidAmountCents } from '../utils/money';
 
 export interface ParsedExpenseInput {
   amountCents: number;
@@ -15,12 +16,13 @@ export async function createExpense(telegramId: string, input: ParsedExpenseInpu
   const user = await getOrCreateUser(telegramId);
   await ensureDefaultCategory(user.id);
   const category = await getOrCreateCategory(user.id, input.categoryName || 'Outros');
+  const amountCents = assertValidAmountCents(input.amountCents, 'expense.amountCents');
 
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
       categoryId: category.id,
-      amountCents: input.amountCents,
+      amountCents,
       description: input.description || 'Sem descrição',
       date: input.date,
       rawText: input.rawText,
@@ -43,10 +45,11 @@ export async function findExpenseForUser(telegramId: string, expenseId: number) 
 export async function updateExpenseAmount(telegramId: string, expenseId: number, amountCents: number) {
   const { user, expense } = await findExpenseForUser(telegramId, expenseId);
   if (!expense) return null;
+  const normalizedCents = assertValidAmountCents(amountCents, 'amountCents');
 
   const updated = await prisma.expense.update({
     where: { id: expense.id },
-    data: { amountCents },
+    data: { amountCents: normalizedCents },
     include: { category: true },
   });
 
