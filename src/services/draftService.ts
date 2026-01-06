@@ -1,11 +1,11 @@
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
-import { getOrCreateUser } from './userService';
+import { getAdminUser } from './userService';
 import { ParsedExpense } from './parseExpenseText';
 import { assertValidAmountCents } from '../utils/money';
 
 export async function createDraftFromParsed(telegramId: string, parsed: ParsedExpense) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   await ensureDefaultCategory(user.id);
   const category = await getOrCreateCategory(user.id, parsed.categoryName || 'Outros');
   const amountCents = assertValidAmountCents(parsed.amountCents, 'draft.amountCents');
@@ -26,7 +26,7 @@ export async function createDraftFromParsed(telegramId: string, parsed: ParsedEx
 }
 
 export async function getDraftForUser(draftId: string, telegramId: string) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   const draft = await prisma.expenseDraft.findFirst({
     where: { id: draftId, userId: user.id },
     include: { category: true },
@@ -71,6 +71,7 @@ export async function deleteDraft(draftId: string, telegramId: string) {
 export async function confirmDraft(draftId: string, telegramId: string) {
   const { draft, user } = await getDraftForUser(draftId, telegramId);
   if (!draft) return null;
+  console.log('[telegram] saving expense with userId=admin');
   const amountCents = assertValidAmountCents(draft.amountCents, 'draft.amountCents');
 
   const expense = await prisma.expense.create({

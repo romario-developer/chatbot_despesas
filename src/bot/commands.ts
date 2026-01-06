@@ -1,4 +1,4 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Bot, InlineKeyboard } from 'grammy';
 import { amountStringToCents, formatCurrency, formatCurrencyNumber } from '../utils/money';
 import { formatDate, nowBahia, parseDateFromText, dayjs, TZ } from '../utils/dates';
@@ -11,7 +11,7 @@ import {
   updateExpenseDescription,
 } from '../services/expenseService';
 import { getMonthlyExpensesPage } from '../services/reportService';
-import { getOrCreateUser } from '../services/userService';
+import { getAdminUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
 import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
@@ -21,6 +21,9 @@ import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
 import { setSession, clearSession } from '../services/sessionService';
 import { generateResetToken } from '../services/resetService';
 import { prisma } from '../db/prisma';
+import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
+
+const BOT_USER_KEY = ADMIN_TELEGRAM_ID;
 
 function parseMonthArg(raw?: string) {
   if (!raw) return null;
@@ -62,12 +65,12 @@ function formatBRL(amount: number) {
 function requireTelegramId(ctx: any) {
   const telegramId = ctx.from?.id;
   if (!telegramId) {
-    throw new Error('Não consegui identificar o usuário do Telegram.');
+    throw new Error('NÆo consegui identificar o usu rio do Telegram.');
   }
   return String(telegramId);
 }
 
-async function requireLinkedUserId(ctx: any) {
+async function requireLinkedAdminUser(ctx: any) {
   const chatId = ctx.chat?.id ?? ctx.from?.id;
   if (!chatId) {
     await ctx.reply('Nao consegui identificar o chat deste Telegram.', {
@@ -75,15 +78,18 @@ async function requireLinkedUserId(ctx: any) {
     });
     return null;
   }
-  const userId = await findUserIdByChatId(String(chatId));
-  if (!userId) {
+
+  const isLinked = await findUserIdByChatId(String(chatId));
+  if (!isLinked) {
     await ctx.reply(
       'Voce precisa vincular sua conta. No app, toque em "Conectar Telegram" e envie aqui: /link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return null;
   }
-  return userId;
+
+  const adminUser = await getAdminUser();
+  return adminUser.id;
 }
 
 function escapeHtml(text: string) {
@@ -92,7 +98,7 @@ function escapeHtml(text: string) {
 
 function truncate(text: string, max = 35) {
   if (text.length <= max) return text;
-  return `${text.slice(0, max - 1).trimEnd()}…`;
+  return `${text.slice(0, max - 1).trimEnd()}.`;
 }
 
 function formatDateShort(date: Date) {
@@ -108,7 +114,7 @@ function buildCategoryBlock(
   totalCents: number,
 ) {
   if (!categorySummary.length || !totalCents) {
-    return '<b>Categorias</b>\n\nSem lançamentos no período.';
+    return '<b>Categorias</b>\n\nSem lan‡amentos no per¡odo.';
   }
 
   const limit = 12;
@@ -136,7 +142,7 @@ function buildCategoryBlock(
 
   const lines = categories.map((c) => {
     const percent = totalCents ? Math.round((c.totalCents / totalCents) * 100) : 0;
-    return `${escapeHtml(c.name)} — ${formatCurrency(c.totalCents)} (${percent}%)`;
+    return `${escapeHtml(c.name)} - ${formatCurrency(c.totalCents)} (${percent}%)`;
   });
 
   return `<b>Categorias</b>\n\n${lines.join('\n\n')}`;
@@ -160,19 +166,19 @@ export function buildExpensesListMessage(input: {
   items: ExpenseListItem[];
 }) {
   const monthStr = String(input.month).padStart(2, '0');
-  const header = `<b>Despesas — ${monthStr}/${input.year}</b>`;
-  const meta = `Página ${input.page} de ${input.totalPages} — Itens ${input.totalCount}`;
-  const totalLine = `<b>Total do mês: ${formatCurrency(input.totalCents)}</b>`;
+  const header = `<b>Despesas - ${monthStr}/${input.year}</b>`;
+  const meta = `P gina ${input.page} de ${input.totalPages} - Itens ${input.totalCount}`;
+  const totalLine = `<b>Total do mˆs: ${formatCurrency(input.totalCents)}</b>`;
 
   if (!input.totalCount) {
-    return `${header}\n${meta}\n${totalLine}\n\nSem lançamentos neste mês.`;
+    return `${header}\n${meta}\n${totalLine}\n\nSem lan‡amentos neste mˆs.`;
   }
 
   const lines = input.items
     .map((e) => {
-      const desc = truncate((e.description || '').trim() || 'Sem descrição');
-      const line1 = `${e.id} — ${escapeHtml(desc)}`;
-      const line2 = `${formatDateShort(e.date)} — ${escapeHtml(e.category.name)} — ${formatCurrency(
+      const desc = truncate((e.description || '').trim() || 'Sem descri‡Æo');
+      const line1 = `${e.id} - ${escapeHtml(desc)}`;
+      const line2 = `${formatDateShort(e.date)} - ${escapeHtml(e.category.name)} - ${formatCurrency(
         e.amountCents,
       )}`;
       return `${line1}\n${line2}`;
@@ -191,14 +197,14 @@ export async function sendAjuda(ctx: any) {
 
 export async function sendRegistrarHint(ctx: any) {
   await ctx.reply(
-    'Envie o gasto em texto, o bot cria um rascunho e pede confirmação.\nExemplos: "35 diesel", "mercado 128,90", "pix 60 pro João categoria serviços".',
+    'Envie o gasto em texto, o bot cria um rascunho e pede confirma‡Æo.\nExemplos: "35 diesel", "mercado 128,90", "pix 60 pro JoÆo categoria servi‡os".',
     { reply_markup: buildMenuKeyboard() },
   );
 }
 
 export async function sendCategorias(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
-  const user = await getOrCreateUser(telegramId);
+  requireTelegramId(ctx);
+  const user = await getAdminUser();
   await ensureDefaultCategory(user.id);
   const categories = await listCategories(user.id);
   if (!categories.length) {
@@ -212,8 +218,8 @@ export async function sendCategorias(ctx: any) {
 
 export async function handleRelatorioCommand(ctx: any) {
   try {
-    const userId = await requireLinkedUserId(ctx);
-    if (!userId) return;
+    const adminUserId = await requireLinkedAdminUser(ctx);
+    if (!adminUserId) return;
 
     const monthArg = (ctx.match as string | undefined)?.trim() ?? '';
     let month = parseMonthArg(monthArg);
@@ -227,11 +233,11 @@ export async function handleRelatorioCommand(ctx: any) {
       };
     }
 
-    const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
+    const summary = await getMonthlySummary({ userId: BOT_USER_KEY, month: month.key });
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('[telegram][relatorio] summary:', {
-        userId,
+        adminUserId,
         month: month.key,
         expensesCount: summary.expensesCount,
         totalCents: summary.totalCents,
@@ -266,7 +272,7 @@ export async function handleRelatorioCommand(ctx: any) {
 
 export async function handleDespesasCommand(ctx: any, opts?: { month?: number; year?: number }) {
   try {
-    const telegramId = requireTelegramId(ctx);
+    requireTelegramId(ctx);
     const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
     const now = nowBahia();
     let month = opts?.month ?? now.month() + 1;
@@ -283,7 +289,7 @@ export async function handleDespesasCommand(ctx: any, opts?: { month?: number; y
     }
 
     const pageSize = 10;
-    const pageData = await getMonthlyExpensesPage(telegramId, month, year, 1, pageSize);
+    const pageData = await getMonthlyExpensesPage(BOT_USER_KEY, month, year, 1, pageSize);
     const message = buildExpensesListMessage({
       year,
       month,
@@ -306,12 +312,12 @@ export async function handleDespesasCommand(ctx: any, opts?: { month?: number; y
 }
 
 async function handleResetTotalCommand(ctx: any) {
-  const telegramId = requireTelegramId(ctx);
-  const user = await getOrCreateUser(telegramId);
+  requireTelegramId(ctx);
+  const user = await getAdminUser();
   const { token } = await generateResetToken(user.id);
 
   const lines = [
-    '⚠️ Isso apagara TODAS as suas despesas, rascunhos e categorias.',
+    '?? Isso apagara TODAS as suas despesas, rascunhos e categorias.',
     'Para confirmar, envie exatamente:',
     `RESET ${token}`,
     '',
@@ -347,7 +353,7 @@ export async function handleClearScreen(ctx: any) {
 }
 
 async function handleSalarioCommand(ctx: any) {
-  const userId = await requireLinkedUserId(ctx);
+  const userId = await requireLinkedAdminUser(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
@@ -369,13 +375,13 @@ async function handleSalarioCommand(ctx: any) {
 
   await upsertPlanning(userId, updated);
 
-  await ctx.reply(`Salário de ${month.key} definido para ${formatBRL(amount)}`, {
+  await ctx.reply(`Sal rio de ${month.key} definido para ${formatBRL(amount)}`, {
     reply_markup: buildMenuKeyboard(),
   });
 }
 
 async function handleExtraCommand(ctx: any) {
-  const userId = await requireLinkedUserId(ctx);
+  const userId = await requireLinkedAdminUser(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
@@ -386,7 +392,7 @@ async function handleExtraCommand(ctx: any) {
   const amount = parseAmountNumber(amountArg);
 
   if (!month || amount === null || amount <= 0) {
-    await ctx.reply('Use: /extra YYYY-MM valor descri‡Æo(opcional). Ex: /extra 2026-01 250 freela', {
+    await ctx.reply('Use: /extra YYYY-MM valor descriÎ’o(opcional). Ex: /extra 2026-01 250 freela', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
@@ -408,7 +414,7 @@ async function handleExtraCommand(ctx: any) {
 }
 
 async function handleFixaCommand(ctx: any) {
-  const userId = await requireLinkedUserId(ctx);
+  const userId = await requireLinkedAdminUser(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const amountArg = args[0];
@@ -416,7 +422,7 @@ async function handleFixaCommand(ctx: any) {
 
   const amount = parseAmountNumber(amountArg);
   if (amount === null || amount <= 0) {
-    await ctx.reply('Use: /fixa valor descri‡Æo(opcional). Ex: /fixa 120 internet', {
+    await ctx.reply('Use: /fixa valor descriÎ’o(opcional). Ex: /fixa 120 internet', {
       reply_markup: buildMenuKeyboard(),
     });
     return;
@@ -435,7 +441,7 @@ async function handleFixaCommand(ctx: any) {
 }
 
 async function handlePlanejamentoCommand(ctx: any) {
-  const userId = await requireLinkedUserId(ctx);
+  const userId = await requireLinkedAdminUser(ctx);
   if (!userId) return;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
@@ -451,7 +457,7 @@ async function handlePlanejamentoCommand(ctx: any) {
     };
   }
 
-  const summary = await getMonthlySummary({ userId: String(userId), month: month.key });
+  const summary = await getMonthlySummary({ userId: BOT_USER_KEY, month: month.key });
 
   const receita = summary.salaryTotal + summary.extrasTotal;
   const fixas = summary.fixedPlannedTotal;
@@ -528,28 +534,28 @@ async function handleLinkCommand(ctx: any) {
 async function handleMeCommand(ctx: any) {
   const chatId = ctx.chat?.id ?? ctx.from?.id;
   if (!chatId) {
-    await ctx.reply('NÆo consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
+    await ctx.reply('N’o consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
     return;
   }
   const userId = await findUserIdByChatId(String(chatId));
   if (!userId) {
     await ctx.reply(
-      'Este chat nÆo est  vinculado. No app/PWA, gere um c¢digo e envie: /link SEU_CODIGO',
+      'Este chat n’o estÿ vinculado. No app/PWA, gere um c½digo e envie: /link SEU_CODIGO',
       { reply_markup: buildMenuKeyboard() },
     );
     return;
   }
 
-  await ctx.reply(`Chat vinculado ao usu rio #${userId}.`, { reply_markup: buildMenuKeyboard() });
+  await ctx.reply(`Chat vinculado ao usuÿrio #${userId}.`, { reply_markup: buildMenuKeyboard() });
 }
 
 export function registerCommandHandlers(bot: Bot) {
   bot.command('start', async (ctx) => {
-    const telegramId = requireTelegramId(ctx);
-    const user = await getOrCreateUser(telegramId);
+    requireTelegramId(ctx);
+    const user = await getAdminUser();
     await ensureDefaultCategory(user.id);
     await ctx.reply(
-      'Olá! Envie um texto com seu gasto, ex: "mercado 128,90" ou "pix 60 pro João categoria serviços".\n\nUse os botões abaixo para atalhos rápidos ou apenas mande o gasto em texto. O bot vai pedir confirmação antes de salvar.',
+      'Ol ! Envie um texto com seu gasto, ex: "mercado 128,90" ou "pix 60 pro JoÆo categoria servi‡os".\n\nUse os botäes abaixo para atalhos r pidos ou apenas mande o gasto em texto. O bot vai pedir confirma‡Æo antes de salvar.',
       { reply_markup: buildMenuKeyboard() },
     );
   });
@@ -589,7 +595,7 @@ export function registerCommandHandlers(bot: Bot) {
 
   bot.command('editar', async (ctx) => {
     try {
-      const telegramId = requireTelegramId(ctx);
+      requireTelegramId(ctx);
       const args = (ctx.match as string | undefined)?.trim();
       if (!args) {
         await ctx.reply('Formato: /editar ID campo novo_valor', { reply_markup: buildMenuKeyboard() });
@@ -599,7 +605,7 @@ export function registerCommandHandlers(bot: Bot) {
       const [idStr, field, ...rest] = args.split(' ');
       const expenseId = Number.parseInt(idStr, 10);
       if (Number.isNaN(expenseId)) {
-        await ctx.reply('ID inválido. Ex: /editar 12 valor 40,50', { reply_markup: buildMenuKeyboard() });
+        await ctx.reply('ID inv lido. Ex: /editar 12 valor 40,50', { reply_markup: buildMenuKeyboard() });
         return;
       }
       const newValue = rest.join(' ').trim();
@@ -614,51 +620,51 @@ export function registerCommandHandlers(bot: Bot) {
       if (fieldName === 'valor') {
         const amountCents = amountStringToCents(newValue);
         if (amountCents === null) {
-          await ctx.reply('Valor inválido. Use formatos como 40 ou 40,50.', { reply_markup: buildMenuKeyboard() });
+          await ctx.reply('Valor inv lido. Use formatos como 40 ou 40,50.', { reply_markup: buildMenuKeyboard() });
           return;
         }
-        const result = await updateExpenseAmount(telegramId, expenseId, amountCents);
+        const result = await updateExpenseAmount(BOT_USER_KEY, expenseId, amountCents);
         if (!result) {
-          await ctx.reply('Despesa não encontrada.', { reply_markup: buildMenuKeyboard() });
+          await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
         }
         await ctx.reply(
-          `Atualizado valor para ${formatCurrency(result.expense.amountCents)} — ID #${result.expense.id}`,
+          `Atualizado valor para ${formatCurrency(result.expense.amountCents)} - ID #${result.expense.id}`,
           { reply_markup: buildMenuKeyboard() },
         );
-      } else if (fieldName === 'descricao' || fieldName === 'descrição') {
-        const result = await updateExpenseDescription(telegramId, expenseId, newValue);
+      } else if (fieldName === 'descricao' || fieldName === 'descri‡Æo') {
+        const result = await updateExpenseDescription(BOT_USER_KEY, expenseId, newValue);
         if (!result) {
-          await ctx.reply('Despesa não encontrada.', { reply_markup: buildMenuKeyboard() });
+          await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
         }
-        await ctx.reply(`Descrição atualizada para "${result.expense.description}" — ID #${result.expense.id}`, {
+        await ctx.reply(`Descri‡Æo atualizada para "${result.expense.description}" - ID #${result.expense.id}`, {
           reply_markup: buildMenuKeyboard(),
         });
       } else if (fieldName === 'categoria') {
-        const result = await updateExpenseCategory(telegramId, expenseId, newValue);
+        const result = await updateExpenseCategory(BOT_USER_KEY, expenseId, newValue);
         if (!result) {
-          await ctx.reply('Despesa não encontrada.', { reply_markup: buildMenuKeyboard() });
+          await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
         }
-        await ctx.reply(`Categoria atualizada para ${result.expense.category.name} — ID #${result.expense.id}`, {
+        await ctx.reply(`Categoria atualizada para ${result.expense.category.name} - ID #${result.expense.id}`, {
           reply_markup: buildMenuKeyboard(),
         });
       } else if (fieldName === 'data') {
         const parsedDate = parseDateFromText(newValue);
         if (!parsedDate) {
-          await ctx.reply('Data inválida. Use hoje, ontem, 25/12 ou 25/12/2025.', {
+          await ctx.reply('Data inv lida. Use hoje, ontem, 25/12 ou 25/12/2025.', {
             reply_markup: buildMenuKeyboard(),
           });
           return;
         }
         const normalized = dayjs(parsedDate.date).tz(TZ).startOf('day').toDate();
-        const result = await updateExpenseDate(telegramId, expenseId, normalized);
+        const result = await updateExpenseDate(BOT_USER_KEY, expenseId, normalized);
         if (!result) {
-          await ctx.reply('Despesa não encontrada.', { reply_markup: buildMenuKeyboard() });
+          await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
         }
-        await ctx.reply(`Data atualizada para ${formatDate(result.expense.date)} — ID #${result.expense.id}`, {
+        await ctx.reply(`Data atualizada para ${formatDate(result.expense.date)} - ID #${result.expense.id}`, {
           reply_markup: buildMenuKeyboard(),
         });
       } else {
@@ -674,7 +680,7 @@ export function registerCommandHandlers(bot: Bot) {
 
   bot.command('remover', async (ctx) => {
     try {
-      const telegramId = requireTelegramId(ctx);
+      requireTelegramId(ctx);
       const args = (ctx.match as string | undefined)?.trim();
       if (!args) {
         await ctx.reply('Use: /remover ID', { reply_markup: buildMenuKeyboard() });
@@ -683,18 +689,18 @@ export function registerCommandHandlers(bot: Bot) {
 
       const expenseId = Number.parseInt(args.split(' ')[0], 10);
       if (Number.isNaN(expenseId)) {
-        await ctx.reply('ID inválido.', { reply_markup: buildMenuKeyboard() });
+        await ctx.reply('ID inv lido.', { reply_markup: buildMenuKeyboard() });
         return;
       }
 
-      const result = await deleteExpense(telegramId, expenseId);
+      const result = await deleteExpense(BOT_USER_KEY, expenseId);
       if (!result) {
-        await ctx.reply('Despesa não encontrada para este usuário.', { reply_markup: buildMenuKeyboard() });
+        await ctx.reply('Despesa nÆo encontrada para este usu rio.', { reply_markup: buildMenuKeyboard() });
         return;
       }
 
       await ctx.reply(
-        `Despesa removida: ${formatCurrency(result.expense.amountCents)} — ${result.expense.description} — ID #${result.expense.id}`,
+        `Despesa removida: ${formatCurrency(result.expense.amountCents)} - ${result.expense.description} - ID #${result.expense.id}`,
         { reply_markup: buildMenuKeyboard() },
       );
     } catch (err) {
@@ -704,7 +710,7 @@ export function registerCommandHandlers(bot: Bot) {
   });
 
   bot.command('limpar_despesas', async (ctx) => {
-    const telegramId = requireTelegramId(ctx);
+    requireTelegramId(ctx);
     const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
     const match = args.match(/(\d{1,2})\/(\d{4})/);
     if (!match) {
@@ -714,12 +720,12 @@ export function registerCommandHandlers(bot: Bot) {
     const month = Number.parseInt(match[1], 10);
     const year = Number.parseInt(match[2], 10);
     if (month < 1 || month > 12) {
-      await ctx.reply('Mês inválido. Use MM/AAAA.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Mˆs inv lido. Use MM/AAAA.', { reply_markup: buildMenuKeyboard() });
       return;
     }
 
     const ymKey = `${year}-${String(month).padStart(2, '0')}`;
-    await setSession(telegramId, 'confirm:delete', ymKey);
+    await setSession(BOT_USER_KEY, 'confirm:delete', ymKey);
 
     await ctx.reply(
       `Tem certeza que deseja apagar as despesas de ${match[1].padStart(2, '0')}/${year}?` +
@@ -741,7 +747,7 @@ export function registerCommandHandlers(bot: Bot) {
     try {
       await handleSalarioCommand(ctx);
     } catch {
-      await ctx.reply('Erro ao salvar salário. Tente novamente.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Erro ao salvar sal rio. Tente novamente.', { reply_markup: buildMenuKeyboard() });
     }
   });
 
@@ -781,7 +787,7 @@ export function registerCommandHandlers(bot: Bot) {
     try {
       await handleMeCommand(ctx);
     } catch {
-      await ctx.reply('Erro ao consultar vincula‡Æo.', { reply_markup: buildMenuKeyboard() });
+      await ctx.reply('Erro ao consultar vinculaÎ’o.', { reply_markup: buildMenuKeyboard() });
     }
   });
 

@@ -1,6 +1,6 @@
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
-import { getOrCreateUser } from './userService';
+import { getAdminUser } from './userService';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 import { assertValidAmountCents } from '../utils/money';
 
@@ -13,7 +13,7 @@ export interface ParsedExpenseInput {
 }
 
 export async function createExpense(telegramId: string, input: ParsedExpenseInput) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   await ensureDefaultCategory(user.id);
   const category = await getOrCreateCategory(user.id, input.categoryName || 'Outros');
   const amountCents = assertValidAmountCents(input.amountCents, 'expense.amountCents');
@@ -34,7 +34,7 @@ export async function createExpense(telegramId: string, input: ParsedExpenseInpu
 }
 
 export async function findExpenseForUser(telegramId: string, expenseId: number) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   const expense = await prisma.expense.findFirst({
     where: { id: expenseId, userId: user.id },
     include: { category: true },
@@ -109,7 +109,7 @@ export async function deleteExpense(telegramId: string, expenseId: number) {
 }
 
 export async function deleteExpensesForMonth(telegramId: string, month: number, year: number) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const aggregate = await prisma.expense.aggregate({

@@ -1,5 +1,5 @@
 import { prisma } from '../db/prisma';
-import { getOrCreateUser } from './userService';
+import { getAdminUser } from './userService';
 
 export type SessionMode =
   | 'edit:value'
@@ -10,7 +10,7 @@ export type SessionMode =
   | 'reset:pending';
 
 export async function getSessionByTelegramId(telegramId: string) {
-  const user = await getOrCreateUser(telegramId);
+  const user = await getAdminUser();
   const session = await prisma.userSession.findUnique({ where: { userId: user.id } });
   return { session, user };
 }

@@ -6,8 +6,9 @@ import { formatCurrency } from '../utils/money';
 import { formatDate } from '../utils/dates';
 import { buildExpensesListMessage } from './commands';
 import { getMonthlyExpensesPage } from '../services/reportService';
-import { getOrCreateUser } from '../services/userService';
+import { getAdminUser } from '../services/userService';
 import { cancelReset } from '../services/resetService';
+import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
 
 function buildSummary(draft: {
   amountCents: number;
@@ -15,7 +16,7 @@ function buildSummary(draft: {
   category: { name: string };
   date: Date;
 }) {
-  return `Valor: ${formatCurrency(draft.amountCents)}\nCategoria: ${draft.category.name}\nDescrição: ${draft.description}\nData: ${formatDate(draft.date)}`;
+  return `Valor: ${formatCurrency(draft.amountCents)}\nCategoria: ${draft.category.name}\nDescri‡Æo: ${draft.description}\nData: ${formatDate(draft.date)}`;
 }
 
 export function registerCallbackHandlers(bot: Bot) {
@@ -23,14 +24,15 @@ export function registerCallbackHandlers(bot: Bot) {
     const data = ctx.callbackQuery.data || '';
     const telegramId = ctx.from?.id;
     if (!telegramId) {
-      await ctx.answerCallbackQuery({ text: 'Usuário não identificado' });
+      await ctx.answerCallbackQuery({ text: 'Usu rio nÆo identificado' });
       return;
     }
     const telegramIdStr = String(telegramId);
+    const userKey = ADMIN_TELEGRAM_ID;
 
     try {
       if (data === 'reset:cancel') {
-        const user = await getOrCreateUser(telegramIdStr);
+        const user = await getAdminUser();
         await cancelReset(user.id);
         await ctx.editMessageText('Operacao cancelada.');
         await ctx.answerCallbackQuery({ text: 'Cancelado' });
@@ -38,14 +40,14 @@ export function registerCallbackHandlers(bot: Bot) {
       }
       if (data.startsWith('exp:confirm:')) {
         const draftId = data.split(':')[2];
-        const result = await confirmDraft(draftId, telegramIdStr);
+        const result = await confirmDraft(draftId, userKey);
         if (!result) {
-          await ctx.answerCallbackQuery({ text: 'Rascunho não encontrado' });
+          await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
         }
-        await clearSession(telegramIdStr);
+        await clearSession(userKey);
         await ctx.editMessageText(
-          `✅ Salvei!\n${buildSummary({
+          `? Salvei!\n${buildSummary({
             amountCents: result.expense.amountCents,
             description: result.expense.description,
             category: { name: result.expense.category.name },
@@ -58,22 +60,22 @@ export function registerCallbackHandlers(bot: Bot) {
 
       if (data.startsWith('exp:cancel:')) {
         const draftId = data.split(':')[2];
-        const result = await deleteDraft(draftId, telegramIdStr);
-        await clearSession(telegramIdStr);
+        const result = await deleteDraft(draftId, userKey);
+        await clearSession(userKey);
         if (!result) {
-          await ctx.answerCallbackQuery({ text: 'Rascunho não encontrado' });
+          await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
         }
-        await ctx.editMessageText('Rascunho cancelado ❌');
+        await ctx.editMessageText('Rascunho cancelado ?');
         await ctx.answerCallbackQuery({ text: 'Cancelado' });
         return;
       }
 
       if (data.startsWith('exp:edit:')) {
         const draftId = data.split(':')[2];
-        const { draft } = await getDraftForUser(draftId, telegramIdStr);
+        const { draft } = await getDraftForUser(draftId, userKey);
         if (!draft) {
-          await ctx.answerCallbackQuery({ text: 'Rascunho não encontrado' });
+          await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
         }
 
@@ -86,33 +88,33 @@ export function registerCallbackHandlers(bot: Bot) {
 
       if (data.startsWith('exp:editfield:')) {
         const [, , draftId, field] = data.split(':');
-        const { draft } = await getDraftForUser(draftId, telegramIdStr);
+        const { draft } = await getDraftForUser(draftId, userKey);
         if (!draft) {
-          await ctx.answerCallbackQuery({ text: 'Rascunho não encontrado' });
+          await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
         }
 
         let prompt = '';
         if (field === 'value') {
-          await setSession(telegramIdStr, 'edit:value', draftId);
+          await setSession(userKey, 'edit:value', draftId);
           prompt = 'Envie o novo valor (ex: 40,50)';
         } else if (field === 'category') {
-          await setSession(telegramIdStr, 'edit:category', draftId);
+          await setSession(userKey, 'edit:category', draftId);
           prompt = 'Envie o nome da categoria';
         } else if (field === 'description') {
-          await setSession(telegramIdStr, 'edit:description', draftId);
-          prompt = 'Envie a nova descrição';
+          await setSession(userKey, 'edit:description', draftId);
+          prompt = 'Envie a nova descri‡Æo';
         } else if (field === 'date') {
-          await setSession(telegramIdStr, 'edit:date', draftId);
+          await setSession(userKey, 'edit:date', draftId);
           prompt = 'Envie a nova data (hoje, ontem, 25/12, 25/12/2025)';
         } else {
-          await ctx.answerCallbackQuery({ text: 'Campo inválido' });
+          await ctx.answerCallbackQuery({ text: 'Campo inv lido' });
           return;
         }
 
         await ctx.answerCallbackQuery();
         await ctx.editMessageText(`${prompt}\n\nRascunho atual:\n${buildSummary(draft)}`, {
-          reply_markup: new InlineKeyboard().text('Cancelar ❌', `exp:cancel:${draftId}`),
+          reply_markup: new InlineKeyboard().text('Cancelar ?', `exp:cancel:${draftId}`),
         });
         return;
       }
@@ -125,12 +127,12 @@ export function registerCallbackHandlers(bot: Bot) {
         const year = Number.parseInt(yearStr, 10);
         const month = Number.parseInt(monthStr, 10);
         if (!year || !month) {
-          await ctx.answerCallbackQuery({ text: 'Período inválido' });
+          await ctx.answerCallbackQuery({ text: 'Per¡odo inv lido' });
           return;
         }
 
         const pageSize = 10;
-        const pageData = await getMonthlyExpensesPage(telegramIdStr, month, year, pageRequested, pageSize);
+        const pageData = await getMonthlyExpensesPage(userKey, month, year, pageRequested, pageSize);
         const message = buildExpensesListMessage({
           year,
           month,
@@ -150,7 +152,7 @@ export function registerCallbackHandlers(bot: Bot) {
         return;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erro ao processar ação.';
+      const message = err instanceof Error ? err.message : 'Erro ao processar a‡Æo.';
       await ctx.answerCallbackQuery({ text: message, show_alert: true });
     }
   });
