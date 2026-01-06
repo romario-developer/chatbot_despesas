@@ -3,7 +3,7 @@ import { Router } from "express";
 
 import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
-import { dayjs, TZ } from "../../utils/dates";
+import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { resolveAuthUserId } from "../utils/authUser";
 import { getOrCreateUser } from "../../services/userService";
@@ -14,9 +14,8 @@ const router = Router();
 
 function parseDateOnly(dateStr: unknown): Date | null {
   if (typeof dateStr !== "string") return null;
-  const parsed = dayjs.tz(dateStr, "YYYY-MM-DD", TZ);
-  if (!parsed.isValid()) return null;
-  return parsed.startOf("day").toDate();
+  const normalized = normalizeDateOnly(dateStr, TZ);
+  return normalized;
 }
 
 function mapExpense(expense: {

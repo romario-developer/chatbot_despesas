@@ -1,5 +1,5 @@
 import { amountStringToCents } from '../utils/money';
-import { nowBahia, parseDateFromText, TZ, dayjs } from '../utils/dates';
+import { nowBahia, parseDateFromText, TZ, dayjs, normalizeDateOnly } from '../utils/dates';
 
 export interface ParsedExpense {
   amountCents: number;
@@ -41,13 +41,8 @@ export function parseExpenseText(text: string): ParsedExpense {
   if (dateInfo?.matchedText) {
     workingText = workingText.replace(dateInfo.matchedText, ' ');
   }
-  const date = (dateInfo?.date
-    ? dayjs(dateInfo.date)
-    : nowBahia()
-  )
-    .tz(TZ)
-    .startOf('day')
-    .toDate();
+  const rawDate = dateInfo?.date ? dayjs(dateInfo.date) : nowBahia();
+  const date = normalizeDateOnly(rawDate.toDate()) ?? rawDate.toDate();
 
   let categoryName = 'Outros';
   const categoryMatch = workingText.match(/categoria\s+([a-zA-ZÀ-ÿ0-9\s]+)/i);
