@@ -90,6 +90,13 @@ curl -H "Authorization: Bearer $TOKEN" \
   "http://localhost:3000/api/summary?month=2025-01"
 ```
 
+### Export CSV (Admin)
+- Endpoint protegido por `x-admin-token: <ADMIN_TOKEN>`.
+- `GET /api/admin/exports/expenses.csv?month=YYYY-MM&from=YYYY-MM-DD&to=YYYY-MM-DD&source=...&category=...`
+  - `month` preferencial; se presente ignora `from/to`.
+  - `source`/`category` opcionais (filtro contem, case-insensitive).
+  - Exporta item a item com colunas `date,description,category,amount,source` (data YYYY-MM-DD, amount em reais).
+
 ## Telegram (bot)
 - Crie o bot com o BotFather e defina `BOT_TOKEN`.
 - Fluxo: usuario envia mensagem com valor/data/categoria; o bot cria rascunho, permite confirmar/editar/cancelar.
@@ -97,7 +104,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Reset total (perigoso)
 - Use `/reset_total` para iniciar. O bot nao apaga nada ainda; gera um token curto, grava na sessao por 5 minutos e responde pedindo o texto `RESET <token>` e um botao inline "Cancelar".
-- Ao receber `RESET <token>`, valida token e expiracao para o proprio `telegram_id`, apaga todas as despesas, rascunhos e categorias em transacao, recria a categoria padrão "Outros" e limpa a sessao.
+- Ao receber `RESET <token>`, valida token e expiracao para o proprio `telegram_id`, apaga todas as despesas, rascunhos e categorias em transacao, recria a categoria padrao "Outros" e limpa a sessao.
 - Tokens invalidos ou expirados sao recusados; rode `/reset_total` novamente para um novo desafio. O botao "Cancelar" remove o token sem apagar nada.
 - Nao ha endpoint HTTP para reset e o filtro sempre e por usuario (multiusuario seguro).
 
@@ -119,64 +126,6 @@ curl -H "Authorization: Bearer $TOKEN" \
   npm run db:restore -- --file backups/backup-YYYYMMDDTHHMM.json
   ```
 - O backup inclui usuarios, categorias, despesas, rascunhos, planejamento, sessoes e codigos de link do Telegram. O restore preserva IDs e reajusta sequences.
-- Endpoint temporario para admin (requer `ADMIN_TOKEN`):
-  ```http
-  GET /api/admin/backup   (Authorization: Bearer <ADMIN_TOKEN>)
-  ```
-  Retorna o JSON do backup e loga o caminho do arquivo salvo (padrao `/tmp/backups` no Render). Use apenas para extração segura.
-
-### Admin temporario: migrar dados de usuario
-
-Endpoint temporario para consolidar dados de um usuario antigo (ex.: `admin`) para o usuario atual (ex.: `api-admin`). Requer `ADMIN_TOKEN` configurado.
-
-- `POST /api/admin/migrate-user-data`
-- Header: `x-admin-token: <ADMIN_TOKEN>`
-- Body JSON:
-  ```json
-  {
-    "oldTelegramId": "admin",
-    "newTelegramId": "api-admin"
-  }
-  ```
-- Resposta (exemplo):
-  ```json
-  {
-    "movedEntries": 12,
-    "movedDrafts": 0,
-    "movedCategories": 3,
-    "movedPlanning": 1,
-    "movedSessions": 1,
-    "oldUserId": 1,
-    "newUserId": 2
-  }
-  ```
-
-Exemplo curl (Insomnia similar):
-```
-curl -X POST https://<host>/api/admin/migrate-user-data \
-  -H "Content-Type: application/json" \
-  -H "x-admin-token: $ADMIN_TOKEN" \
-  -d '{"oldTelegramId":"admin","newTelegramId":"api-admin"}'
-```
-
-// Remover este endpoint apos concluir a migracao.
-
-### Admin temporario: listar usuarios e migrar por ID
-
-- `GET /api/admin/users/with-counts`
-  - Header: `x-admin-token: <ADMIN_TOKEN>`
-  - Retorna lista de usuarios com contagens `{ id, telegramId, createdAt, entriesCount, planningCount }` ordenada por `entriesCount` desc.
-
-- `POST /api/admin/migrate-user-data-by-userid`
-  - Header: `x-admin-token: <ADMIN_TOKEN>`
-  - Body:
-    ```json
-    {
-      "oldUserId": 1,
-      "newTelegramId": "api-admin"
-    }
-    ```
-  - Usa `oldUserId` conhecido e migra para o usuario resolvido por `newTelegramId` (create se nao existir). Resposta traz contagens movidas.
 
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.

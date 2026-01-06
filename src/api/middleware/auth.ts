@@ -43,8 +43,6 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
     req.auth = { sub };
     req.user = { id: user.id, telegramId: user.telegramId, telegramChatId: user.telegramChatId };
 
-    console.log('[DEBUG][AUTH MAP]', { sub, userId: user.id });
-
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Unauthorized' });
