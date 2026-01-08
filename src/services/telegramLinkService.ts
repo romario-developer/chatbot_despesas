@@ -116,8 +116,12 @@ export async function findUserIdByChatId(telegramChatId: string) {
 export async function getLinkStatus(userId: number) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { telegramChatId: true },
+    select: { telegramChatId: true, telegramId: true },
   });
 
-  return { linked: Boolean(user?.telegramChatId), telegramChatId: user?.telegramChatId ?? null };
+  const linked = Boolean(user?.telegramChatId || user?.telegramId);
+  return {
+    linked,
+    telegramChatId: user?.telegramChatId ?? null,
+  };
 }

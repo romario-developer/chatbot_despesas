@@ -187,7 +187,7 @@ function logApiRoutes() {
   const routes = [
     `${API_BASE_PATH}/health`,
     `${API_BASE_PATH}/auth (login: POST ${API_BASE_PATH}/auth/login)`,
-    `${API_BASE_PATH}/telegram (status: GET ${API_BASE_PATH}/telegram/status)`,
+    `${API_BASE_PATH}/telegram (status: GET ${API_BASE_PATH}/telegram/status, health: GET ${API_BASE_PATH}/telegram/health)`,
     `${API_BASE_PATH}/entries`,
     `${API_BASE_PATH}/categories`,
     `${API_BASE_PATH}/reports`,
