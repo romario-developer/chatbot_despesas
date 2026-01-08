@@ -1,14 +1,14 @@
 import { Bot, InlineKeyboard } from 'grammy';
-import { confirmationKeyboard, editKeyboard, expensesPaginationKeyboard } from './keyboards';
+import { editKeyboard, expensesPaginationKeyboard } from './keyboards';
 import { confirmDraft, deleteDraft, getDraftForUser } from '../services/draftService';
 import { setSession, clearSession } from '../services/sessionService';
 import { formatCurrency } from '../utils/money';
 import { formatDate } from '../utils/dates';
 import { buildExpensesListMessage } from './commands';
 import { getMonthlyExpensesPage } from '../services/reportService';
-import { getAdminUser } from '../services/userService';
 import { cancelReset } from '../services/resetService';
-import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
+import { buildMenuKeyboard } from './menu';
+import { resolveLinkedUser } from './telegramUser';
 
 function buildSummary(draft: {
   amountCents: number;
@@ -27,25 +27,34 @@ export function registerCallbackHandlers(bot: Bot) {
       await ctx.answerCallbackQuery({ text: 'Usu rio nÆo identificado' });
       return;
     }
-    const telegramIdStr = String(telegramId);
-    const userKey = ADMIN_TELEGRAM_ID;
+    const linkedUser = await resolveLinkedUser(ctx);
+    if (!linkedUser) {
+      await ctx.answerCallbackQuery({
+        text: 'Seu Telegram nao esta vinculado. Abra o PWA e conecte.',
+        show_alert: true,
+      });
+      await ctx.reply('Seu Telegram nao esta vinculado. Abra o PWA e conecte.', {
+        reply_markup: buildMenuKeyboard(),
+      });
+      return;
+    }
+    const userId = linkedUser.id;
 
     try {
       if (data === 'reset:cancel') {
-        const user = await getAdminUser();
-        await cancelReset(user.id);
+        await cancelReset(userId);
         await ctx.editMessageText('Operacao cancelada.');
         await ctx.answerCallbackQuery({ text: 'Cancelado' });
         return;
       }
       if (data.startsWith('exp:confirm:')) {
         const draftId = data.split(':')[2];
-        const result = await confirmDraft(draftId, userKey);
+        const result = await confirmDraft(draftId, userId);
         if (!result) {
           await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
         }
-        await clearSession(userKey);
+        await clearSession(userId);
         await ctx.editMessageText(
           `? Salvei!\n${buildSummary({
             amountCents: result.expense.amountCents,
@@ -60,8 +69,8 @@ export function registerCallbackHandlers(bot: Bot) {
 
       if (data.startsWith('exp:cancel:')) {
         const draftId = data.split(':')[2];
-        const result = await deleteDraft(draftId, userKey);
-        await clearSession(userKey);
+        const result = await deleteDraft(draftId, userId);
+        await clearSession(userId);
         if (!result) {
           await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
@@ -73,7 +82,7 @@ export function registerCallbackHandlers(bot: Bot) {
 
       if (data.startsWith('exp:edit:')) {
         const draftId = data.split(':')[2];
-        const { draft } = await getDraftForUser(draftId, userKey);
+        const { draft } = await getDraftForUser(draftId, userId);
         if (!draft) {
           await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
@@ -88,7 +97,7 @@ export function registerCallbackHandlers(bot: Bot) {
 
       if (data.startsWith('exp:editfield:')) {
         const [, , draftId, field] = data.split(':');
-        const { draft } = await getDraftForUser(draftId, userKey);
+        const { draft } = await getDraftForUser(draftId, userId);
         if (!draft) {
           await ctx.answerCallbackQuery({ text: 'Rascunho nÆo encontrado' });
           return;
@@ -96,16 +105,16 @@ export function registerCallbackHandlers(bot: Bot) {
 
         let prompt = '';
         if (field === 'value') {
-          await setSession(userKey, 'edit:value', draftId);
+          await setSession(userId, 'edit:value', draftId);
           prompt = 'Envie o novo valor (ex: 40,50)';
         } else if (field === 'category') {
-          await setSession(userKey, 'edit:category', draftId);
+          await setSession(userId, 'edit:category', draftId);
           prompt = 'Envie o nome da categoria';
         } else if (field === 'description') {
-          await setSession(userKey, 'edit:description', draftId);
+          await setSession(userId, 'edit:description', draftId);
           prompt = 'Envie a nova descri‡Æo';
         } else if (field === 'date') {
-          await setSession(userKey, 'edit:date', draftId);
+          await setSession(userId, 'edit:date', draftId);
           prompt = 'Envie a nova data (hoje, ontem, 25/12, 25/12/2025)';
         } else {
           await ctx.answerCallbackQuery({ text: 'Campo inv lido' });
@@ -132,7 +141,7 @@ export function registerCallbackHandlers(bot: Bot) {
         }
 
         const pageSize = 10;
-        const pageData = await getMonthlyExpensesPage(userKey, month, year, pageRequested, pageSize);
+        const pageData = await getMonthlyExpensesPage(userId, month, year, pageRequested, pageSize);
         const message = buildExpensesListMessage({
           year,
           month,

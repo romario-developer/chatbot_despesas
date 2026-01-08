@@ -5,8 +5,6 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
-import { resolveAuthUserId } from "../utils/authUser";
-import { getOrCreateUser } from "../../services/userService";
 import { getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
 
@@ -42,12 +40,15 @@ function mapExpense(expense: {
 }
 
 async function resolveUser(req: AuthedRequest) {
-  const telegramId = resolveAuthUserId(req);
-  return getOrCreateUser(telegramId);
+  if (req.user) return req.user;
+  return null;
 }
 
 router.get("/", async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const { from, to, category, q } = req.query;
 
@@ -108,6 +109,9 @@ router.get("/:id", async (req: AuthedRequest, res) => {
   }
 
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const expense = await prisma.expense.findFirst({
     where: { id, userId: user.id },
@@ -123,6 +127,9 @@ router.get("/:id", async (req: AuthedRequest, res) => {
 
 router.post("/", async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const { amount, description, category, date } = req.body ?? {};
 
@@ -169,6 +176,9 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   }
 
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const { amount, description, category, date } = req.body ?? {};
 
@@ -243,6 +253,9 @@ router.delete("/:id", async (req: AuthedRequest, res) => {
   }
 
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const deleted = await prisma.expense.deleteMany({ where: { id, userId: user.id } });
   if (!deleted.count) {

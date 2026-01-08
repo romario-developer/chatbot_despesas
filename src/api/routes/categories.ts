@@ -1,20 +1,20 @@
 import { Router } from 'express';
 
 import { listCategories } from '../../services/categoryService';
-import { getOrCreateUser } from '../../services/userService';
 import { AuthedRequest } from '../middleware/auth';
-import { resolveAuthUserId } from '../utils/authUser';
 
 const router = Router();
 
 async function resolveUser(req: AuthedRequest) {
   if (req.user) return req.user;
-  const telegramId = resolveAuthUserId(req);
-  return getOrCreateUser(telegramId);
+  return null;
 }
 
 router.get('/', async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   const categories = await listCategories(user.id);
 
   const unique = Array.from(

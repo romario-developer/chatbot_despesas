@@ -2,7 +2,6 @@ import { Router } from 'express';
 
 import { getMonthlySummary } from '../../services/monthlySummaryService';
 import { AuthedRequest } from '../middleware/auth';
-import { resolveAuthUserId } from '../utils/authUser';
 
 const router = Router();
 
@@ -15,15 +14,18 @@ function parseMonthParam(value: unknown): string | null {
 
 router.get('/monthly-summary', async (req: AuthedRequest, res) => {
   const month = parseMonthParam(req.query.month);
-  const userTelegramId = resolveAuthUserId(req);
+  const userId = req.user?.id;
 
   if (!month) {
     return res.status(400).json({ error: 'Parametro "month" e obrigatorio no formato YYYY-MM' });
   }
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 
   try {
     const summary = await getMonthlySummary({
-      userId: userTelegramId,
+      userId,
       month,
     });
     return res.json(summary);

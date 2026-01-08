@@ -3,8 +3,6 @@ import { Router } from 'express';
 
 import { AuthedRequest } from '../middleware/auth';
 import { DEFAULT_PLANNING, PlanningData, getPlanningByUserId, upsertPlanning } from '../../services/planningService';
-import { resolveAuthUserId } from '../utils/authUser';
-import { getOrCreateUser } from '../../services/userService';
 
 const router = Router();
 
@@ -70,18 +68,20 @@ function normalizePlanning(input: any): PlanningData {
 }
 
 router.get('/', async (req: AuthedRequest, res) => {
-  const telegramId = resolveAuthUserId(req);
-  const user = await getOrCreateUser(telegramId);
-  const planning = await getPlanningByUserId(user.id);
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const planning = await getPlanningByUserId(req.user.id);
   return res.json(planning ?? DEFAULT_PLANNING);
 });
 
 router.put('/', async (req: AuthedRequest, res) => {
-  const telegramId = resolveAuthUserId(req);
-  const user = await getOrCreateUser(telegramId);
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 
   const normalized = normalizePlanning(req.body ?? {});
-  const saved = await upsertPlanning(user.id, normalized);
+  const saved = await upsertPlanning(req.user.id, normalized);
   return res.json(saved ?? DEFAULT_PLANNING);
 });
 

@@ -1,6 +1,5 @@
 import { prisma } from '../db/prisma';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
-import { getOrCreateUser } from './userService';
 import { assertValidAmountCents } from '../utils/money';
 
 async function buildMonthlyReport(userId: number, month: number, year: number) {
@@ -70,10 +69,9 @@ async function buildMonthlyReport(userId: number, month: number, year: number) {
   };
 }
 
-export async function getMonthlyReport(telegramId: string, month: number, year: number) {
-  const user = await getOrCreateUser(telegramId);
-  const data = await buildMonthlyReport(user.id, month, year);
-  return { ...data, user };
+export async function getMonthlyReport(userId: number, month: number, year: number) {
+  const data = await buildMonthlyReport(userId, month, year);
+  return { ...data, userId };
 }
 
 export async function getMonthlyReportByUserId(userId: number, month: number, year: number) {
@@ -81,17 +79,16 @@ export async function getMonthlyReportByUserId(userId: number, month: number, ye
 }
 
 export async function getMonthlyExpensesPage(
-  telegramId: string,
+  userId: number,
   month: number,
   year: number,
   page: number,
   pageSize: number,
 ) {
-  const user = await getOrCreateUser(telegramId);
   const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const where = {
-    userId: user.id,
+    userId,
     date: {
       gte: start,
       lt: endExclusive,
@@ -123,7 +120,7 @@ export async function getMonthlyExpensesPage(
   );
 
   return {
-    user,
+    userId,
     items,
     totalCount,
     totalPages,

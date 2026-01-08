@@ -1,18 +1,16 @@
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
-import { getAdminUser } from './userService';
 import { ParsedExpense } from './parseExpenseText';
 import { assertValidAmountCents } from '../utils/money';
 
-export async function createDraftFromParsed(telegramId: string, parsed: ParsedExpense) {
-  const user = await getAdminUser();
-  await ensureDefaultCategory(user.id);
-  const category = await getOrCreateCategory(user.id, parsed.categoryName || 'Outros');
+export async function createDraftFromParsed(userId: number, parsed: ParsedExpense) {
+  await ensureDefaultCategory(userId);
+  const category = await getOrCreateCategory(userId, parsed.categoryName || 'Outros');
   const amountCents = assertValidAmountCents(parsed.amountCents, 'draft.amountCents');
 
   const draft = await prisma.expenseDraft.create({
     data: {
-      userId: user.id,
+      userId,
       categoryId: category.id,
       amountCents,
       description: parsed.description || 'Sem descrição',
@@ -22,21 +20,20 @@ export async function createDraftFromParsed(telegramId: string, parsed: ParsedEx
     include: { category: true },
   });
 
-  return { draft, user, category };
+  return { draft, userId, category };
 }
 
-export async function getDraftForUser(draftId: string, telegramId: string) {
-  const user = await getAdminUser();
+export async function getDraftForUser(draftId: string, userId: number) {
   const draft = await prisma.expenseDraft.findFirst({
-    where: { id: draftId, userId: user.id },
+    where: { id: draftId, userId },
     include: { category: true },
   });
-  return { draft, user };
+  return { draft, userId };
 }
 
 export async function updateDraft(
   draftId: string,
-  telegramId: string,
+  userId: number,
   data: Partial<{
     amountCents: number;
     description: string;
@@ -44,7 +41,7 @@ export async function updateDraft(
     categoryId: number;
   }>,
 ) {
-  const { draft, user } = await getDraftForUser(draftId, telegramId);
+  const { draft } = await getDraftForUser(draftId, userId);
   if (!draft) return null;
 
   const dataToUpdate = { ...data };
@@ -58,25 +55,25 @@ export async function updateDraft(
     include: { category: true },
   });
 
-  return { draft: updated, user };
+  return { draft: updated, userId };
 }
 
-export async function deleteDraft(draftId: string, telegramId: string) {
-  const { draft, user } = await getDraftForUser(draftId, telegramId);
+export async function deleteDraft(draftId: string, userId: number) {
+  const { draft } = await getDraftForUser(draftId, userId);
   if (!draft) return null;
   await prisma.expenseDraft.delete({ where: { id: draft.id } });
-  return { draft, user };
+  return { draft, userId };
 }
 
-export async function confirmDraft(draftId: string, telegramId: string) {
-  const { draft, user } = await getDraftForUser(draftId, telegramId);
+export async function confirmDraft(draftId: string, userId: number) {
+  const { draft } = await getDraftForUser(draftId, userId);
   if (!draft) return null;
-  console.log('[telegram] saving expense with userId=admin');
+  console.log('[telegram] saving expense', { userId });
   const amountCents = assertValidAmountCents(draft.amountCents, 'draft.amountCents');
 
   const expense = await prisma.expense.create({
     data: {
-      userId: user.id,
+      userId,
       categoryId: draft.categoryId,
       amountCents,
       description: draft.description,
@@ -89,5 +86,5 @@ export async function confirmDraft(draftId: string, telegramId: string) {
 
   await prisma.expenseDraft.delete({ where: { id: draft.id } });
 
-  return { expense, user, draft };
+  return { expense, userId, draft };
 }

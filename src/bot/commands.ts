@@ -4,28 +4,25 @@ import { amountStringToCents, formatCurrency, formatCurrencyNumber } from '../ut
 import { formatDate, nowBahia, parseDateFromText, dayjs, TZ } from '../utils/dates';
 import {
   deleteExpense,
-  deleteExpensesForMonth,
   updateExpenseAmount,
   updateExpenseCategory,
   updateExpenseDate,
   updateExpenseDescription,
 } from '../services/expenseService';
 import { getMonthlyExpensesPage } from '../services/reportService';
-import { getAdminUser } from '../services/userService';
 import { ensureDefaultCategory, listCategories } from '../services/categoryService';
 import { getPlanningByUserId, upsertPlanning } from '../services/planningService';
-import { consumeLinkCode, findUserIdByChatId } from '../services/telegramLinkService';
+import { consumeLinkCode } from '../services/telegramLinkService';
 import { getMonthlySummary } from '../services/monthlySummaryService';
 import { expensesPaginationKeyboard } from './keyboards';
 import { buildMenuKeyboard, MENU_LABELS, removeMenuKeyboard } from './menu';
-import { setSession, clearSession } from '../services/sessionService';
+import { setSession } from '../services/sessionService';
 import { generateResetToken } from '../services/resetService';
 import { prisma } from '../db/prisma';
-import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
 import { parseExpenseText } from '../services/parseExpenseText';
 import { createDraftFromParsed, confirmDraft } from '../services/draftService';
+import { resolveLinkedUser } from './telegramUser';
 
-const BOT_USER_KEY = ADMIN_TELEGRAM_ID;
 
 function parseMonthArg(raw?: string) {
   if (!raw) return null;
@@ -72,26 +69,15 @@ function requireTelegramId(ctx: any) {
   return String(telegramId);
 }
 
-async function requireLinkedAdminUser(ctx: any) {
-  const chatId = ctx.chat?.id ?? ctx.from?.id;
-  if (!chatId) {
-    await ctx.reply('Nao consegui identificar o chat deste Telegram.', {
+async function requireLinkedUser(ctx: any) {
+  const linkedUser = await resolveLinkedUser(ctx);
+  if (!linkedUser) {
+    await ctx.reply('Seu Telegram nao esta vinculado. Abra o PWA e conecte.', {
       reply_markup: buildMenuKeyboard(),
     });
     return null;
   }
-
-  const isLinked = await findUserIdByChatId(String(chatId));
-  if (!isLinked) {
-    await ctx.reply(
-      'Voce precisa vincular sua conta. No app, toque em "Conectar Telegram" e envie aqui: /link SEU_CODIGO',
-      { reply_markup: buildMenuKeyboard() },
-    );
-    return null;
-  }
-
-  const adminUser = await getAdminUser();
-  return adminUser.id;
+  return linkedUser;
 }
 
 function escapeHtml(text: string) {
@@ -206,9 +192,10 @@ export async function sendRegistrarHint(ctx: any) {
 
 export async function sendCategorias(ctx: any) {
   requireTelegramId(ctx);
-  const user = await getAdminUser();
-  await ensureDefaultCategory(user.id);
-  const categories = await listCategories(user.id);
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  await ensureDefaultCategory(linkedUser.id);
+  const categories = await listCategories(linkedUser.id);
   if (!categories.length) {
     await ctx.reply('Nenhuma categoria cadastrada ainda.', { reply_markup: buildMenuKeyboard() });
     return;
@@ -220,8 +207,8 @@ export async function sendCategorias(ctx: any) {
 
 export async function handleRelatorioCommand(ctx: any) {
   try {
-    const adminUserId = await requireLinkedAdminUser(ctx);
-    if (!adminUserId) return;
+    const linkedUser = await requireLinkedUser(ctx);
+    if (!linkedUser) return;
 
     const monthArg = (ctx.match as string | undefined)?.trim() ?? '';
     let month = parseMonthArg(monthArg);
@@ -235,11 +222,11 @@ export async function handleRelatorioCommand(ctx: any) {
       };
     }
 
-    const summary = await getMonthlySummary({ userId: BOT_USER_KEY, month: month.key });
+    const summary = await getMonthlySummary({ userId: linkedUser.id, month: month.key });
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('[telegram][relatorio] summary:', {
-        adminUserId,
+        userId: linkedUser.id,
         month: month.key,
         expensesCount: summary.expensesCount,
         totalCents: summary.totalCents,
@@ -275,6 +262,8 @@ export async function handleRelatorioCommand(ctx: any) {
 export async function handleDespesasCommand(ctx: any, opts?: { month?: number; year?: number }) {
   try {
     requireTelegramId(ctx);
+    const linkedUser = await requireLinkedUser(ctx);
+    if (!linkedUser) return;
     const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
     const now = nowBahia();
     let month = opts?.month ?? now.month() + 1;
@@ -291,7 +280,7 @@ export async function handleDespesasCommand(ctx: any, opts?: { month?: number; y
     }
 
     const pageSize = 10;
-    const pageData = await getMonthlyExpensesPage(BOT_USER_KEY, month, year, 1, pageSize);
+    const pageData = await getMonthlyExpensesPage(linkedUser.id, month, year, 1, pageSize);
     const message = buildExpensesListMessage({
       year,
       month,
@@ -315,8 +304,9 @@ export async function handleDespesasCommand(ctx: any, opts?: { month?: number; y
 
 async function handleResetTotalCommand(ctx: any) {
   requireTelegramId(ctx);
-  const user = await getAdminUser();
-  const { token } = await generateResetToken(user.id);
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  const { token } = await generateResetToken(linkedUser.id);
 
   const lines = [
     '?? Isso apagara TODAS as suas despesas, rascunhos e categorias.',
@@ -355,8 +345,9 @@ export async function handleClearScreen(ctx: any) {
 }
 
 async function handleSalarioCommand(ctx: any) {
-  const userId = await requireLinkedAdminUser(ctx);
-  if (!userId) return;
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  const userId = linkedUser.id;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
   const amountArg = args[1];
@@ -383,8 +374,9 @@ async function handleSalarioCommand(ctx: any) {
 }
 
 async function handleExtraCommand(ctx: any) {
-  const userId = await requireLinkedAdminUser(ctx);
-  if (!userId) return;
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  const userId = linkedUser.id;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const monthArg = args[0];
   const amountArg = args[1];
@@ -416,8 +408,9 @@ async function handleExtraCommand(ctx: any) {
 }
 
 async function handleFixaCommand(ctx: any) {
-  const userId = await requireLinkedAdminUser(ctx);
-  if (!userId) return;
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  const userId = linkedUser.id;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const amountArg = args[0];
   const label = args.slice(1).join(' ').trim();
@@ -443,8 +436,9 @@ async function handleFixaCommand(ctx: any) {
 }
 
 async function handlePlanejamentoCommand(ctx: any) {
-  const userId = await requireLinkedAdminUser(ctx);
-  if (!userId) return;
+  const linkedUser = await requireLinkedUser(ctx);
+  if (!linkedUser) return;
+  const userId = linkedUser.id;
   const args = (ctx.match as string | undefined)?.trim().split(/\s+/).filter(Boolean) ?? [];
   const maybeMonth = args[0];
 
@@ -459,7 +453,7 @@ async function handlePlanejamentoCommand(ctx: any) {
     };
   }
 
-  const summary = await getMonthlySummary({ userId: BOT_USER_KEY, month: month.key });
+  const summary = await getMonthlySummary({ userId, month: month.key });
 
   const receita = summary.salaryTotal + summary.extrasTotal;
   const fixas = summary.fixedPlannedTotal;
@@ -500,8 +494,9 @@ async function handlePlanejamentoCommand(ctx: any) {
 
 async function handleLinkCommand(ctx: any) {
   const chatId = ctx.chat?.id ?? ctx.from?.id;
+  const fromId = ctx.from?.id;
   const code = (ctx.match as string | undefined)?.trim();
-  if (!chatId) {
+  if (!chatId || !fromId) {
     await ctx.reply('Nao consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
     return;
   }
@@ -513,7 +508,7 @@ async function handleLinkCommand(ctx: any) {
     return;
   }
 
-  const result = await consumeLinkCode(String(chatId), code);
+  const result = await consumeLinkCode(String(chatId), String(fromId), code);
   if (!result.ok) {
     if (result.reason === 'chat_already_linked') {
       await ctx.reply(
@@ -534,28 +529,23 @@ async function handleLinkCommand(ctx: any) {
 }
 
 async function handleMeCommand(ctx: any) {
-  const chatId = ctx.chat?.id ?? ctx.from?.id;
-  if (!chatId) {
-    await ctx.reply('N’o consegui identificar o chat deste Telegram.', { reply_markup: buildMenuKeyboard() });
-    return;
-  }
-  const userId = await findUserIdByChatId(String(chatId));
-  if (!userId) {
-    await ctx.reply(
-      'Este chat n’o estÿ vinculado. No app/PWA, gere um c½digo e envie: /link SEU_CODIGO',
-      { reply_markup: buildMenuKeyboard() },
-    );
+  const linkedUser = await resolveLinkedUser(ctx);
+  if (!linkedUser) {
+    await ctx.reply('Seu Telegram nao esta vinculado. Abra o PWA e conecte.', {
+      reply_markup: buildMenuKeyboard(),
+    });
     return;
   }
 
-  await ctx.reply(`Chat vinculado ao usuÿrio #${userId}.`, { reply_markup: buildMenuKeyboard() });
+  await ctx.reply(`Chat vinculado ao usuario #${linkedUser.id}.`, { reply_markup: buildMenuKeyboard() });
 }
 
 export function registerCommandHandlers(bot: Bot) {
   bot.command('start', async (ctx) => {
     requireTelegramId(ctx);
-    const user = await getAdminUser();
-    await ensureDefaultCategory(user.id);
+    const linkedUser = await requireLinkedUser(ctx);
+    if (!linkedUser) return;
+    await ensureDefaultCategory(linkedUser.id);
     await ctx.reply(
       'Ol ! Envie um texto com seu gasto, ex: "mercado 128,90" ou "pix 60 pro JoÆo categoria servi‡os".\n\nUse os botäes abaixo para atalhos r pidos ou apenas mande o gasto em texto. O bot vai pedir confirma‡Æo antes de salvar.',
       { reply_markup: buildMenuKeyboard() },
@@ -598,6 +588,8 @@ export function registerCommandHandlers(bot: Bot) {
   bot.command('despesa', async (ctx) => {
     try {
       requireTelegramId(ctx);
+      const linkedUser = await requireLinkedUser(ctx);
+      if (!linkedUser) return;
       const input = (ctx.match as string | undefined)?.trim() ?? '';
       if (!input) {
         await ctx.reply('Use: /despesa VALOR descricao [DATA opcional DD/MM ou DD/MM/AAAA]', {
@@ -607,8 +599,8 @@ export function registerCommandHandlers(bot: Bot) {
       }
 
       const parsed = parseExpenseText(input);
-      const { draft } = await createDraftFromParsed(BOT_USER_KEY, parsed);
-      const confirmed = await confirmDraft(draft.id, BOT_USER_KEY);
+      const { draft } = await createDraftFromParsed(linkedUser.id, parsed);
+      const confirmed = await confirmDraft(draft.id, linkedUser.id);
       if (!confirmed) {
         await ctx.reply('NÆo consegui salvar a despesa.', { reply_markup: buildMenuKeyboard() });
         return;
@@ -630,6 +622,8 @@ export function registerCommandHandlers(bot: Bot) {
   bot.command('editar', async (ctx) => {
     try {
       requireTelegramId(ctx);
+      const linkedUser = await requireLinkedUser(ctx);
+      if (!linkedUser) return;
       const args = (ctx.match as string | undefined)?.trim();
       if (!args) {
         await ctx.reply('Formato: /editar ID campo novo_valor', { reply_markup: buildMenuKeyboard() });
@@ -657,7 +651,7 @@ export function registerCommandHandlers(bot: Bot) {
           await ctx.reply('Valor inv lido. Use formatos como 40 ou 40,50.', { reply_markup: buildMenuKeyboard() });
           return;
         }
-        const result = await updateExpenseAmount(BOT_USER_KEY, expenseId, amountCents);
+        const result = await updateExpenseAmount(linkedUser.id, expenseId, amountCents);
         if (!result) {
           await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
@@ -667,7 +661,7 @@ export function registerCommandHandlers(bot: Bot) {
           { reply_markup: buildMenuKeyboard() },
         );
       } else if (fieldName === 'descricao' || fieldName === 'descri‡Æo') {
-        const result = await updateExpenseDescription(BOT_USER_KEY, expenseId, newValue);
+        const result = await updateExpenseDescription(linkedUser.id, expenseId, newValue);
         if (!result) {
           await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
@@ -676,7 +670,7 @@ export function registerCommandHandlers(bot: Bot) {
           reply_markup: buildMenuKeyboard(),
         });
       } else if (fieldName === 'categoria') {
-        const result = await updateExpenseCategory(BOT_USER_KEY, expenseId, newValue);
+        const result = await updateExpenseCategory(linkedUser.id, expenseId, newValue);
         if (!result) {
           await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
@@ -693,7 +687,7 @@ export function registerCommandHandlers(bot: Bot) {
           return;
         }
         const normalized = dayjs(parsedDate.date).tz(TZ).startOf('day').toDate();
-        const result = await updateExpenseDate(BOT_USER_KEY, expenseId, normalized);
+        const result = await updateExpenseDate(linkedUser.id, expenseId, normalized);
         if (!result) {
           await ctx.reply('Despesa nÆo encontrada.', { reply_markup: buildMenuKeyboard() });
           return;
@@ -715,6 +709,8 @@ export function registerCommandHandlers(bot: Bot) {
   bot.command('remover', async (ctx) => {
     try {
       requireTelegramId(ctx);
+      const linkedUser = await requireLinkedUser(ctx);
+      if (!linkedUser) return;
       const args = (ctx.match as string | undefined)?.trim();
       if (!args) {
         await ctx.reply('Use: /remover ID', { reply_markup: buildMenuKeyboard() });
@@ -727,7 +723,7 @@ export function registerCommandHandlers(bot: Bot) {
         return;
       }
 
-      const result = await deleteExpense(BOT_USER_KEY, expenseId);
+      const result = await deleteExpense(linkedUser.id, expenseId);
       if (!result) {
         await ctx.reply('Despesa nÆo encontrada para este usu rio.', { reply_markup: buildMenuKeyboard() });
         return;
@@ -745,6 +741,8 @@ export function registerCommandHandlers(bot: Bot) {
 
   bot.command('limpar_despesas', async (ctx) => {
     requireTelegramId(ctx);
+    const linkedUser = await requireLinkedUser(ctx);
+    if (!linkedUser) return;
     const args = (ctx.match as string | undefined)?.trim().toLowerCase() ?? '';
     const match = args.match(/(\d{1,2})\/(\d{4})/);
     if (!match) {
@@ -759,7 +757,7 @@ export function registerCommandHandlers(bot: Bot) {
     }
 
     const ymKey = `${year}-${String(month).padStart(2, '0')}`;
-    await setSession(BOT_USER_KEY, 'confirm:delete', ymKey);
+    await setSession(linkedUser.id, 'confirm:delete', ymKey);
 
     await ctx.reply(
       `Tem certeza que deseja apagar as despesas de ${match[1].padStart(2, '0')}/${year}?` +
@@ -842,9 +840,11 @@ export function registerCommandHandlers(bot: Bot) {
     if (typeof chatId !== 'undefined') candidates.push(String(chatId));
     if (typeof fromId !== 'undefined' && (!chatId || chatId !== fromId)) candidates.push(String(fromId));
 
-    for (const candidate of candidates) {
+    if (candidates.length) {
       const user = await prisma.user.findFirst({
-        where: { telegramChatId: candidate },
+        where: {
+          OR: [{ telegramChatId: { in: candidates } }, { telegramId: { in: candidates } }],
+        },
         select: { id: true, telegramId: true, telegramChatId: true, createdAt: true },
       });
       if (user) {
@@ -855,7 +855,6 @@ export function registerCommandHandlers(bot: Bot) {
           chatId: user.telegramChatId,
           createdAt: user.createdAt,
         };
-        break;
       }
     }
 

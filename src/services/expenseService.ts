@@ -1,6 +1,5 @@
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
-import { getAdminUser } from './userService';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 import { assertValidAmountCents } from '../utils/money';
 
@@ -12,15 +11,14 @@ export interface ParsedExpenseInput {
   rawText: string;
 }
 
-export async function createExpense(telegramId: string, input: ParsedExpenseInput) {
-  const user = await getAdminUser();
-  await ensureDefaultCategory(user.id);
-  const category = await getOrCreateCategory(user.id, input.categoryName || 'Outros');
+export async function createExpense(userId: number, input: ParsedExpenseInput) {
+  await ensureDefaultCategory(userId);
+  const category = await getOrCreateCategory(userId, input.categoryName || 'Outros');
   const amountCents = assertValidAmountCents(input.amountCents, 'expense.amountCents');
 
   const expense = await prisma.expense.create({
     data: {
-      userId: user.id,
+      userId,
       categoryId: category.id,
       amountCents,
       description: input.description || 'Sem descrição',
@@ -30,20 +28,19 @@ export async function createExpense(telegramId: string, input: ParsedExpenseInpu
     },
   });
 
-  return { expense, category, user };
+  return { expense, category, userId };
 }
 
-export async function findExpenseForUser(telegramId: string, expenseId: number) {
-  const user = await getAdminUser();
+export async function findExpenseForUser(userId: number, expenseId: number) {
   const expense = await prisma.expense.findFirst({
-    where: { id: expenseId, userId: user.id },
+    where: { id: expenseId, userId },
     include: { category: true },
   });
-  return { user, expense };
+  return { userId, expense };
 }
 
-export async function updateExpenseAmount(telegramId: string, expenseId: number, amountCents: number) {
-  const { user, expense } = await findExpenseForUser(telegramId, expenseId);
+export async function updateExpenseAmount(userId: number, expenseId: number, amountCents: number) {
+  const { expense } = await findExpenseForUser(userId, expenseId);
   if (!expense) return null;
   const normalizedCents = assertValidAmountCents(amountCents, 'amountCents');
 
@@ -53,15 +50,15 @@ export async function updateExpenseAmount(telegramId: string, expenseId: number,
     include: { category: true },
   });
 
-  return { user, expense: updated };
+  return { userId, expense: updated };
 }
 
 export async function updateExpenseDescription(
-  telegramId: string,
+  userId: number,
   expenseId: number,
   description: string,
 ) {
-  const { user, expense } = await findExpenseForUser(telegramId, expenseId);
+  const { expense } = await findExpenseForUser(userId, expenseId);
   if (!expense) return null;
 
   const updated = await prisma.expense.update({
@@ -70,25 +67,25 @@ export async function updateExpenseDescription(
     include: { category: true },
   });
 
-  return { user, expense: updated };
+  return { userId, expense: updated };
 }
 
-export async function updateExpenseCategory(telegramId: string, expenseId: number, categoryName: string) {
-  const { user, expense } = await findExpenseForUser(telegramId, expenseId);
+export async function updateExpenseCategory(userId: number, expenseId: number, categoryName: string) {
+  const { expense } = await findExpenseForUser(userId, expenseId);
   if (!expense) return null;
 
-  const category = await getOrCreateCategory(user.id, categoryName);
+  const category = await getOrCreateCategory(userId, categoryName);
   const updated = await prisma.expense.update({
     where: { id: expense.id },
     data: { categoryId: category.id },
     include: { category: true },
   });
 
-  return { user, expense: updated, category };
+  return { userId, expense: updated, category };
 }
 
-export async function updateExpenseDate(telegramId: string, expenseId: number, date: Date) {
-  const { user, expense } = await findExpenseForUser(telegramId, expenseId);
+export async function updateExpenseDate(userId: number, expenseId: number, date: Date) {
+  const { expense } = await findExpenseForUser(userId, expenseId);
   if (!expense) return null;
 
   const updated = await prisma.expense.update({
@@ -97,24 +94,23 @@ export async function updateExpenseDate(telegramId: string, expenseId: number, d
     include: { category: true },
   });
 
-  return { user, expense: updated };
+  return { userId, expense: updated };
 }
 
-export async function deleteExpense(telegramId: string, expenseId: number) {
-  const { user, expense } = await findExpenseForUser(telegramId, expenseId);
+export async function deleteExpense(userId: number, expenseId: number) {
+  const { expense } = await findExpenseForUser(userId, expenseId);
   if (!expense) return null;
 
   await prisma.expense.delete({ where: { id: expense.id } });
-  return { user, expense };
+  return { userId, expense };
 }
 
-export async function deleteExpensesForMonth(telegramId: string, month: number, year: number) {
-  const user = await getAdminUser();
+export async function deleteExpensesForMonth(userId: number, month: number, year: number) {
   const { start, endExclusive } = getMonthRangeFromMonthYear(month, year);
 
   const aggregate = await prisma.expense.aggregate({
     where: {
-      userId: user.id,
+      userId,
       date: { gte: start, lt: endExclusive },
     },
     _count: true,
@@ -123,13 +119,13 @@ export async function deleteExpensesForMonth(telegramId: string, month: number, 
 
   const deleted = await prisma.expense.deleteMany({
     where: {
-      userId: user.id,
+      userId,
       date: { gte: start, lt: endExclusive },
     },
   });
 
   return {
-    user,
+    userId,
     deletedCount: deleted.count,
     totalCents: aggregate._sum.amountCents ?? 0,
   };

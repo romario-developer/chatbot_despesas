@@ -36,6 +36,7 @@ model Category {
   drafts   ExpenseDraft[]
 
   @@unique([userId, normalizedName])
+  @@index([userId, createdAt])
 }
 
 model Expense {
@@ -51,6 +52,8 @@ model Expense {
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model ExpenseDraft {

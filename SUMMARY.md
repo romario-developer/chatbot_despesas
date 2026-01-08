@@ -1,70 +1,80 @@
 # Resumo do Projeto (Bot de Despesas Telegram)
 
-## Visão geral
+## Visao geral
 - Bot Telegram em Node.js + TypeScript com grammy.
-- Persistência via Prisma + SQLite; timezone fixo America/Bahia.
-- Fluxo seguro: mensagens de texto viram rascunhos (ExpenseDraft) e só salvam após confirmação.
-- Multiusuário por `telegram_id`; categorias dinâmicas por usuário (cria se não existe).
+- Persistencia via Prisma + SQLite; timezone fixo America/Bahia.
+- Fluxo seguro: mensagens viram rascunhos (ExpenseDraft) e so salvam apos confirmacao.
+- Multiusuario por `telegram_id`; dados isolados por usuario; categorias dinamicas por usuario.
 
 ## Modelos principais
-- User: telegramId (unique).
-- Category: name, normalizedName, unique por usuário.
+- User: telegramId (unique), mustChangePassword.
+- Category: name, normalizedName, unique por usuario.
 - Expense: amountCents, description, date, categoryId, userId, source, rawText.
 - ExpenseDraft: rascunho antes de confirmar.
-- UserSession: estado de edição ou confirmações especiais (ex.: apagar mês).
+- UserSession: estado de edicao ou confirmacoes especiais (ex.: apagar mes).
+
+## Auth e admin
+- mustChangePassword + endpoint de troca de senha.
+- Admin endpoint para criar usuarios.
+- Todas as consultas e mutacoes filtradas por usuario.
 
 ## Parser de despesas
-- Valor: detecta formatos 10 | 10,50 | 10.50 | R$ 10,50 → amountCents.
-- Data: hoje, ontem, DD/MM, DD/MM/YYYY, YYYY-MM-DD (default hoje).
-- Categoria: “categoria X” > inferência por palavras-chave > “Outros”.
-- Descrição: texto restante; se vazio, “Sem descrição”.
+- Valor: detecta formatos 10 | 10,50 | 10.50 | R$ 10,50 -> amountCents.
+- Data: hoje, ontem, DD/MM, DD/MM/YYYY, YYYY-MM-DD (default hoje); normalizacao evita shift de timezone.
+- Categoria: "categoria X" -> inferencia por palavras-chave -> "Outros".
+- Descricao: texto restante; se vazio, "Sem descricao".
 - Retorna `confidence` (high/medium/low) e `issues` (missing_description, ambiguous_category).
 
 ## UX de captura
-- Mensagem texto → cria ExpenseDraft, mostra resumo + teclas inline (Confirmar / Editar / Cancelar).
-- Se confidence low, sugere edição.
-- Edição guiada por botões (valor, categoria, descrição, data); session controla o campo em edição.
+- Mensagem texto -> cria ExpenseDraft, mostra resumo + teclas inline (Confirmar / Editar / Cancelar).
+- Se confidence low, sugere edicao.
+- Edicao guiada por botoes (valor, categoria, descricao, data); session controla o campo em edicao.
 
 ## Menu fixo (Reply Keyboard)
-- Botões:
-  - 📊 Relatório (mês) → /relatorio mes
-  - 🧾 Despesas (lista) → /despesas mes (paginado)
-  - ➕ Registrar → lembrete para enviar texto livre (cria rascunho)
-  - 🏷️ Categorias → /categorias
-  - 🧹 Limpar tela → apaga ~25 mensagens recentes do bot (não dados) e confirma
-  - ⚙️ Ajuda → /ajuda
+- Botoes:
+  - Relatorio (mes) -> /relatorio mes
+  - Despesas (lista) -> /despesas mes (paginado)
+  - Registrar -> lembrete para enviar texto livre (cria rascunho)
+  - Categorias -> /categorias
+  - Limpar tela -> apaga ~25 mensagens recentes do bot (nao dados) e confirma
+  - Ajuda -> /ajuda
 - /menu ativa; /ocultar_menu esconde.
 
 ## Comandos principais
 - /start: boas-vindas + menu.
-- /ajuda: instruções + exemplos.
-- /categorias: lista categorias do usuário.
-- /relatorio [mes|MM/AAAA]: resumo mensal HTML (cabeçalho + categorias com %).
-- /despesas [mes|MM/AAAA]: lista paginada (10/pg) com inline prev/next. Itens: linha1 `ID — descrição`, linha2 `DD/MM — Categoria — R$ valor`.
+- /ajuda: instrucoes + exemplos.
+- /categorias: lista categorias do usuario.
+- /relatorio [mes|MM/AAAA]: resumo mensal HTML (cabecalho + categorias com %).
+- /despesas [mes|MM/AAAA]: lista paginada (10/pg) com inline prev/next.
 - /editar ID campo valor: campos valor/descricao/categoria/data.
-- /remover ID: remove despesa do usuário.
-- /limpar_despesas MM/AAAA: confirmação em 2 etapas (“APAGAR MM/AAAA”), apaga despesas do mês do usuário.
-- /limpar ou botão “🧹 Limpar tela”: remove últimas mensagens do bot no chat (não mexe no banco).
+- /remover ID: remove despesa do usuario.
+- /limpar_despesas MM/AAAA: confirmacao em 2 etapas ("APAGAR MM/AAAA"), apaga despesas do mes do usuario.
+- /limpar ou botao "Limpar tela": remove ultimas mensagens do bot no chat (nao mexe no banco).
 
-## Relatório (/relatorio)
+## Relatorio (/relatorio)
 - HTML parse_mode.
-- Cabeçalho: título MM/AAAA, período (início-fim), lançamentos, total.
-- Seção Categorias (uma por bloco, com linha em branco): `Nome — R$ valor (X%)`.
-- Não lista despesas no /relatorio (apenas resumo).
+- Cabecalho: titulo MM/AAAA, periodo (inicio-fim), lancamentos, total.
+- Secao Categorias (uma por bloco, com linha em branco): `Nome - R$ valor (X%)`.
+- Nao lista despesas no /relatorio (apenas resumo).
 
-## Paginação (/despesas)
+## Paginacao (/despesas)
 - Comando dedicado; callback data `exp:list:YYYY-MM:page`.
-- Cabeçalho + meta + total do mês; itens em duas linhas; descrições truncadas.
+- Cabecalho + meta + total do mes; itens em duas linhas; descricoes truncadas.
 
-## Sanitização/segurança
-- Todas as consultas/edições/remoções filtram por `telegram_id`.
-- Categoria normalizada (trim, lowercase, espaços simples).
-- “Outros” garantido como fallback por usuário.
+## Exportacao CSV
+- Exportacao CSV oficial mantida; endpoints debug/compare removidos.
 
-## Execução
-- Polling por padrão; webhook opcional via env.
+## Outros ajustes recentes
+- CORS permite novo origin da PWA.
+- Cache-Control e Pragma adicionados.
+- Fix build: permite categoryId em updateMany.
+- Summary inclui todas as sources; lista PWA mostra todas por padrao.
+- Migracao de dados de users antigos para admin.
+
+## Execucao
+- Polling por padrao; webhook opcional via env.
 - Scripts: dev (tsx watch), build (tsc), start (dist), prisma:migrate/generate/studio.
 
-## Próximas ideias (já mencionadas)
-- Paginação “ver mais” no relatório ou exportação CSV.
-- Áudio/Whisper, webhook em prod, versão WhatsApp (futuro).
+## Proximas ideias (mencionadas)
+- Paginacao "ver mais" no relatorio ou exportacao CSV.
+- Audio/Whisper, webhook em prod, versao WhatsApp (futuro).

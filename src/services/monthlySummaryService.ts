@@ -1,7 +1,6 @@
 import { prisma } from "../db/prisma";
 import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
-import { getOrCreateUser } from "./userService";
 import { getMonthRangeFromMonthYear } from "../utils/dateRange";
 import { assertValidAmountCents, centsToNumber } from "../utils/money";
 
@@ -25,25 +24,11 @@ export type MonthlySummaryResult = {
   forecastBalance: number;
 };
 
-export async function getMonthlySummary(params: { userId: string; month: string }) {
+export async function getMonthlySummary(params: { userId: number; month: string }) {
   const { userId, month } = params;
 
-  if (typeof userId !== "string" || !userId.trim()) {
+  if (!Number.isInteger(userId) || userId <= 0) {
     throw new Error('Parametro "userId" e obrigatorio');
-  }
-
-  const trimmedUserId = userId.trim();
-
-  let user = null as Awaited<ReturnType<typeof getOrCreateUser>> | null;
-  if (/^\d+$/.test(trimmedUserId)) {
-    const existing = await prisma.user.findUnique({ where: { id: Number(trimmedUserId) } });
-    if (existing) {
-      user = existing;
-    }
-  }
-
-  if (!user) {
-    user = await getOrCreateUser(trimmedUserId);
   }
 
   if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
@@ -58,7 +43,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
   const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
 
   const where = {
-    userId: user.id,
+    userId,
     date: { gte: start, lt: endExclusive },
   } as const;
 
@@ -97,7 +82,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
     totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + amountCents);
   }
 
-  const planning = await getPlanningByUserId(user.id);
+  const planning = await getPlanningByUserId(userId);
   const salaryTotal = planning.salaryByMonth[month] ?? 0;
   const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
   const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
@@ -106,9 +91,9 @@ export async function getMonthlySummary(params: { userId: string; month: string 
   const balance = receita - totalExpenses;
   const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
 
-  console.log("[monthly-summary]", { userId: user.id, month });
+  console.log("[monthly-summary]", { userId, month });
   console.log("SUMMARY", {
-    userId: user.id,
+    userId,
     month,
     totalExpenses,
     countBySource: totalsBySource.map((s) => ({ source: s.source, count: s._count._all, cents: s._sum.amountCents })),
@@ -117,7 +102,7 @@ export async function getMonthlySummary(params: { userId: string; month: string 
   if (process.env.NODE_ENV !== "production") {
     console.log(
       "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%.2f extras=%.2f fixas=%.2f",
-      user.id,
+      userId,
       month,
       start.toISOString(),
       new Date(endExclusive.getTime() - 1).toISOString(),

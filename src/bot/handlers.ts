@@ -4,9 +4,8 @@ import { formatCurrency } from '../utils/money';
 import { formatDate, dayjs, TZ } from '../utils/dates';
 import { createDraftFromParsed, getDraftForUser, updateDraft } from '../services/draftService';
 import { confirmationKeyboard, editKeyboard } from './keyboards';
-import { clearSession, getSessionByTelegramId, setSession } from '../services/sessionService';
+import { clearSession, getSessionByUserId } from '../services/sessionService';
 import { getOrCreateCategory } from '../services/categoryService';
-import { getAdminUser } from '../services/userService';
 import { amountStringToCents } from '../utils/money';
 import { parseDateFromText } from '../utils/dates';
 import { confirmAndExecuteReset } from '../services/resetService';
@@ -19,7 +18,7 @@ import {
   handleClearScreen,
 } from './commands';
 import { buildMenuKeyboard, MENU_LABELS } from './menu';
-import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
+import { resolveLinkedUser } from './telegramUser';
 
 function buildSummary(draft: {
   amountCents: number;
@@ -40,11 +39,11 @@ function issuesLabel(issues: string[]) {
   return `\n\n?? Ajustes sugeridos: ${labels.join(' | ')}`;
 }
 
-async function handleSessionInput(ctx: any, userKey: string, mode: string, draftId: string) {
+async function handleSessionInput(ctx: any, userId: number, mode: string, draftId: string) {
   const text = ctx.message.text ?? '';
-  const { draft } = await getDraftForUser(draftId, userKey);
+  const { draft } = await getDraftForUser(draftId, userId);
   if (!draft) {
-    await clearSession(userKey);
+    await clearSession(userId);
     await ctx.reply('NÆo encontrei o rascunho. Reenvie o gasto.');
     return;
   }
@@ -55,14 +54,13 @@ async function handleSessionInput(ctx: any, userKey: string, mode: string, draft
       await ctx.reply('Valor inv lido. Envie algo como 40 ou 40,50.');
       return;
     }
-    await updateDraft(draftId, userKey, { amountCents });
+    await updateDraft(draftId, userId, { amountCents });
   } else if (mode === 'edit:category') {
-    const user = await getAdminUser();
-    const category = await getOrCreateCategory(user.id, text);
-    await updateDraft(draftId, userKey, { categoryId: category.id });
+    const category = await getOrCreateCategory(userId, text);
+    await updateDraft(draftId, userId, { categoryId: category.id });
   } else if (mode === 'edit:description') {
     const description = text.trim() || 'Sem descri‡Æo';
-    await updateDraft(draftId, userKey, { description });
+    await updateDraft(draftId, userId, { description });
   } else if (mode === 'edit:date') {
     const parsed = parseDateFromText(text);
     if (!parsed) {
@@ -70,11 +68,11 @@ async function handleSessionInput(ctx: any, userKey: string, mode: string, draft
       return;
     }
     const date = dayjs(parsed.date).tz(TZ).startOf('day').toDate();
-    await updateDraft(draftId, userKey, { date });
+    await updateDraft(draftId, userId, { date });
   }
 
-  await clearSession(userKey);
-  const updated = await getDraftForUser(draftId, userKey);
+  await clearSession(userId);
+  const updated = await getDraftForUser(draftId, userId);
   if (!updated.draft) {
     await ctx.reply('NÆo encontrei o rascunho ap¢s editar.');
     return;
@@ -125,10 +123,16 @@ export function registerMessageHandlers(bot: Bot) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
     const telegramIdStr = String(telegramId);
-    const userKey = ADMIN_TELEGRAM_ID;
+    const linkedUser = await resolveLinkedUser(ctx);
+    if (!linkedUser) {
+      await ctx.reply('Seu Telegram nao esta vinculado. Abra o PWA e conecte.', {
+        reply_markup: buildMenuKeyboard(),
+      });
+      return;
+    }
 
-    const sessionData = await getSessionByTelegramId(userKey);
-    const { session, user } = sessionData;
+    const sessionData = await getSessionByUserId(linkedUser.id);
+    const { session } = sessionData;
 
     const resetMatch = text.trim().match(/^RESET\s+(.+)$/i);
     if (resetMatch) {
@@ -138,7 +142,7 @@ export function registerMessageHandlers(bot: Bot) {
         return;
       }
 
-      const result = await confirmAndExecuteReset(user.id, token);
+      const result = await confirmAndExecuteReset(linkedUser.id, token);
       if (!result.ok) {
         await ctx.reply('Token invalido ou expirado. Envie /reset_total para gerar um novo.', {
           reply_markup: buildMenuKeyboard(),
@@ -161,20 +165,20 @@ export function registerMessageHandlers(bot: Bot) {
         const month = Number.parseInt(monthStr, 10);
         if (year && month) {
           const { deleteExpensesForMonth } = await import('../services/expenseService');
-          const result = await deleteExpensesForMonth(userKey, month, year);
+          const result = await deleteExpensesForMonth(linkedUser.id, month, year);
           await ctx.reply(
             `Apaguei ${result.deletedCount} despesas de ${monthStr}/${year}.`,
           );
         } else {
           await ctx.reply('Per¡odo inv lido para apagar despesas.');
         }
-        await clearSession(userKey);
+        await clearSession(linkedUser.id);
       } else {
         await ctx.reply('Confirma‡Æo incorreta. Digite exatamente: ' + expected);
       }
       return;
     } else if (session?.mode && session.draftId) {
-      await handleSessionInput(ctx, userKey, session.mode, session.draftId);
+      await handleSessionInput(ctx, linkedUser.id, session.mode, session.draftId);
       return;
     }
 
@@ -183,7 +187,7 @@ export function registerMessageHandlers(bot: Bot) {
 
     try {
       const parsed = parseExpenseText(text);
-      const { draft } = await createDraftFromParsed(userKey, parsed);
+      const { draft } = await createDraftFromParsed(linkedUser.id, parsed);
 
       const summary = buildSummary(draft);
       const baseMessage = `Entendi assim:\n${summary}${issuesLabel(parsed.issues)}\nConfirma?`;

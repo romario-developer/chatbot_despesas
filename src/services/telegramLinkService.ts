@@ -45,7 +45,11 @@ type ConsumeLinkResult =
   | { ok: true; userId: number }
   | { ok: false; reason: 'invalid_or_expired' | 'chat_already_linked' };
 
-export async function consumeLinkCode(telegramChatId: string, code: string): Promise<ConsumeLinkResult> {
+export async function consumeLinkCode(
+  telegramChatId: string,
+  telegramUserId: string,
+  code: string,
+): Promise<ConsumeLinkResult> {
   const record = await prisma.telegramLinkCode.findUnique({ where: { code } });
   if (!record) return { ok: false, reason: 'invalid_or_expired' };
 
@@ -55,12 +59,27 @@ export async function consumeLinkCode(telegramChatId: string, code: string): Pro
     return { ok: false, reason: 'invalid_or_expired' };
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { telegramChatId },
+  const normalizedChatId = telegramChatId.trim();
+  const normalizedUserId = telegramUserId.trim();
+  if (!normalizedChatId || !normalizedUserId) {
+    return { ok: false, reason: 'invalid_or_expired' };
+  }
+
+  const existingChat = await prisma.user.findFirst({
+    where: { telegramChatId: normalizedChatId },
     select: { id: true },
   });
 
-  if (existing && existing.id !== record.userId) {
+  if (existingChat && existingChat.id !== record.userId) {
+    return { ok: false, reason: 'chat_already_linked' };
+  }
+
+  const existingTelegramId = await prisma.user.findFirst({
+    where: { telegramId: normalizedUserId },
+    select: { id: true },
+  });
+
+  if (existingTelegramId && existingTelegramId.id !== record.userId) {
     return { ok: false, reason: 'chat_already_linked' };
   }
 
@@ -68,15 +87,29 @@ export async function consumeLinkCode(telegramChatId: string, code: string): Pro
     prisma.telegramLinkCode.delete({ where: { code } }),
     prisma.user.update({
       where: { id: record.userId },
-      data: { telegramChatId },
+      data: { telegramChatId: normalizedChatId, telegramId: normalizedUserId },
     }),
   ]);
 
   return { ok: true, userId: record.userId };
 }
 
+export async function findUserByTelegramIdentifiers(identifiers: string[]) {
+  const normalized = Array.from(
+    new Set(identifiers.map((value) => value.trim()).filter((value) => value.length)),
+  );
+  if (!normalized.length) return null;
+
+  return prisma.user.findFirst({
+    where: {
+      OR: [{ telegramChatId: { in: normalized } }, { telegramId: { in: normalized } }],
+    },
+    select: { id: true, telegramId: true, telegramChatId: true },
+  });
+}
+
 export async function findUserIdByChatId(telegramChatId: string) {
-  const user = await prisma.user.findFirst({ where: { telegramChatId }, select: { id: true } });
+  const user = await findUserByTelegramIdentifiers([telegramChatId]);
   return user?.id ?? null;
 }
 
