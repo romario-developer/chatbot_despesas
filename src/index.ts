@@ -31,9 +31,13 @@ const PORT = Number(process.env.PORT) || 3000;
 const IS_RENDER = Boolean(process.env.RENDER);
 
 const app = express();
-const allowedOrigins = [PWA_ORIGIN];
+const allowedOrigins = new Set([
+  PWA_ORIGIN,
+  "https://despesas-pwa.onrender.com",
+  "https://despesas-pwa-a20e.onrender.com",
+]);
 if (IS_DEV) {
-  allowedOrigins.push("http://localhost:5173");
+  allowedOrigins.add("http://localhost:5173");
 }
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
@@ -91,9 +95,12 @@ app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS"));
     },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+    optionsSuccessStatus: 204,
   }),
 );
 app.use(express.json());
