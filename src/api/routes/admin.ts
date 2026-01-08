@@ -96,40 +96,59 @@ router.post("/users", async (req, res) => {
 router.post("/telegram/unlink", async (req, res) => {
   if (!requireAdminSecret(req, res)) return;
 
-  const rawChatId = typeof req.body?.telegramChatId === "string" ? req.body.telegramChatId.trim() : "";
-  const rawUserId = typeof req.body?.telegramUserId === "string" ? req.body.telegramUserId.trim() : "";
+  const normalizeId = (value: unknown): string | null => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : null;
+    }
+    return null;
+  };
 
-  if (!rawChatId && !rawUserId) {
+  const chatId = normalizeId(req.body?.telegramChatId);
+  const userId = normalizeId(req.body?.telegramUserId);
+
+  if (!chatId && !userId) {
     return res.status(400).json({ error: "telegramChatId ou telegramUserId obrigatorio" });
   }
 
-  const orFilters: { telegramChatId?: string; telegramId?: string }[] = [];
-  if (rawChatId) orFilters.push({ telegramChatId: rawChatId });
-  if (rawUserId) orFilters.push({ telegramId: rawUserId });
+  const candidates = new Set<string>();
+  if (chatId) candidates.add(chatId);
+  if (userId) candidates.add(userId);
 
-  const user = await prisma.user.findFirst({
-    where: { OR: orFilters },
+  const values = Array.from(candidates);
+
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [{ telegramChatId: { in: values } }, { telegramId: { in: values } }],
+    },
     select: { id: true, email: true, telegramChatId: true, telegramId: true },
   });
 
-  if (!user) {
+  if (!users.length) {
     return res.status(404).json({ error: "Vinculo nao encontrado" });
   }
 
+  const userIds = users.map((user) => user.id);
   await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
+    prisma.user.updateMany({
+      where: { id: { in: userIds } },
       data: { telegramChatId: null, telegramId: null },
     }),
-    prisma.telegramLinkCode.deleteMany({ where: { userId: user.id } }),
+    prisma.telegramLinkCode.deleteMany({ where: { userId: { in: userIds } } }),
   ]);
 
   return res.json({
     ok: true,
-    unlinkedUserId: user.id,
-    email: user.email ?? null,
-    previousTelegramChatId: user.telegramChatId ?? null,
-    previousTelegramUserId: user.telegramId ?? null,
+    clearedCount: users.length,
+    clearedUsers: users.map((user) => ({
+      id: user.id,
+      email: user.email ?? null,
+      prevTelegramChatId: user.telegramChatId ?? null,
+      prevTelegramId: user.telegramId ?? null,
+    })),
   });
 });
 
