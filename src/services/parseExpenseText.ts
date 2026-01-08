@@ -7,11 +7,14 @@ import {
 export type ParsedExpense = ParsedQuickEntry;
 
 const inferenceRules: { keywords: string[]; category: string }[] = [
-  { keywords: ['diesel', 'gasolina', 'combust', 'combust¡vel'], category: 'Combust¡vel' },
-  { keywords: ['mercado', 'supermercado'], category: 'Alimenta‡Æo' },
-  { keywords: ['funcion rio', 'funcionario', 'di ria', 'diaria', 'pagamento'], category: 'Funcion rios' },
-  { keywords: ['ra‡Æo', 'racao', 'vacina', 'animal'], category: 'Animais' },
-  { keywords: ['energia', 'luz', ' gua', 'agua', 'internet'], category: 'Contas' },
+  { keywords: ['diesel', 'gasolina', 'combust', 'combust\u00edvel'], category: 'Combust\u00edvel' },
+  { keywords: ['mercado', 'supermercado'], category: 'Alimenta\u00e7\u00e3o' },
+  {
+    keywords: ['funcion\u00e1rio', 'funcionario', 'di\u00e1ria', 'diaria', 'pagamento'],
+    category: 'Funcion\u00e1rios',
+  },
+  { keywords: ['ra\u00e7\u00e3o', 'racao', 'vacina', 'animal'], category: 'Animais' },
+  { keywords: ['energia', 'luz', '\u00e1gua', 'agua', 'internet'], category: 'Contas' },
 ];
 
 export function parseExpenseText(text: string): ParsedExpense {
@@ -19,7 +22,7 @@ export function parseExpenseText(text: string): ParsedExpense {
     let categoryName = 'Outros';
     let cleanedText = workingText;
 
-    const categoryMatch = cleanedText.match(/categoria\s+([a-zA-Z·-˜0-9\s]+)/i);
+    const categoryMatch = cleanedText.match(/categoria\s+([a-zA-Z\u00c0-\u00ff0-9\s]+)/i);
     if (categoryMatch) {
       categoryName = categoryMatch[1].trim() || 'Outros';
       cleanedText = cleanedText.replace(categoryMatch[0], ' ');
@@ -40,11 +43,11 @@ export function parseExpenseText(text: string): ParsedExpense {
     amountMatchStrategy: 'first',
     categoryResolver,
     defaultCategoryName: 'Outros',
-    defaultDescription: 'Sem descri‡Æo',
+    defaultDescription: 'Sem descri\u00e7\u00e3o',
     messages: {
       emptyText: 'Informe um texto com o gasto.',
-      missingAmount: 'NÆo encontrei o valor. Reenvie incluindo o valor, ex: "mercado 128,90".',
-      invalidAmount: 'NÆo consegui entender o valor. Tente usar formato "35" ou "35,50".',
+      missingAmount: 'N\u00e3o encontrei o valor. Reenvie incluindo o valor, ex: "mercado 128,90".',
+      invalidAmount: 'N\u00e3o consegui entender o valor. Tente usar formato "35" ou "35,50".',
     },
   });
 }
