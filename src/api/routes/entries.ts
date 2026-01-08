@@ -181,12 +181,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
   }
 
-  const existing = await prisma.expense.findFirst({ where: { id, userId: user.id }, include: { category: true } });
-  if (!existing) {
-    return res.status(404).json({ error: "Lancamento nao encontrado" });
-  }
-
-  const data: Prisma.ExpenseUpdateInput = {};
+  const data: Prisma.ExpenseUpdateManyMutationInput = {};
 
   if (typeof amount !== "undefined") {
     const amountCents = toAmountCents(amount);
@@ -216,17 +211,29 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     if (typeof category !== "string" || !category.trim()) {
       return res.status(400).json({ error: "category e obrigatoria" });
     }
-    const categoryRow = await getOrCreateCategory(existing.userId, category);
-    data.category = { connect: { id: categoryRow.id } };
+    const categoryRow = await getOrCreateCategory(user.id, category);
+    data.categoryId = categoryRow.id;
   }
 
-  const updated = await prisma.expense.update({
-    where: { id },
+  const updated = await prisma.expense.updateMany({
+    where: { id, userId: user.id },
     data,
+  });
+
+  if (!updated.count) {
+    return res.status(404).json({ error: "Lancamento nao encontrado" });
+  }
+
+  const saved = await prisma.expense.findFirst({
+    where: { id, userId: user.id },
     include: { category: true },
   });
 
-  return res.json(mapExpense(updated));
+  if (!saved) {
+    return res.status(404).json({ error: "Lancamento nao encontrado" });
+  }
+
+  return res.json(mapExpense(saved));
 });
 
 router.delete("/:id", async (req: AuthedRequest, res) => {
@@ -237,12 +244,10 @@ router.delete("/:id", async (req: AuthedRequest, res) => {
 
   const user = await resolveUser(req);
 
-  const existing = await prisma.expense.findFirst({ where: { id, userId: user.id }, include: { category: true } });
-  if (!existing) {
+  const deleted = await prisma.expense.deleteMany({ where: { id, userId: user.id } });
+  if (!deleted.count) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
   }
-
-  await prisma.expense.delete({ where: { id } });
   return res.status(204).send();
 });
 
