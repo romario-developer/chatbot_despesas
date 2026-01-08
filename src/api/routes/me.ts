@@ -4,44 +4,12 @@ import { prisma } from '../../db/prisma';
 import { getPlanningByUserId, upsertPlanning } from '../../services/planningService';
 import { normalizeCategoryName } from '../../utils/normalize';
 import { dayjs, TZ } from '../../utils/dates';
-import { hashPassword, verifyPassword } from '../../utils/password';
 import { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
 
 const SAMPLE_SOURCE = 'sample';
 const SAMPLE_EXTRA_ID = 'sample-income';
-
-router.post('/password', async (req: AuthedRequest, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const { currentPassword, newPassword } = req.body ?? {};
-  if (typeof currentPassword !== 'string' || !currentPassword.trim()) {
-    return res.status(400).json({ error: 'currentPassword obrigatoria' });
-  }
-  if (typeof newPassword !== 'string' || newPassword.trim().length < 8) {
-    return res.status(400).json({ error: 'newPassword deve ter pelo menos 8 caracteres' });
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: { passwordHash: true },
-  });
-
-  if (!user?.passwordHash || !verifyPassword(currentPassword, user.passwordHash)) {
-    return res.status(401).json({ error: 'Senha atual invalida' });
-  }
-
-  const updatedHash = hashPassword(newPassword.trim());
-  await prisma.user.update({
-    where: { id: req.user.id },
-    data: { passwordHash: updatedHash, mustChangePassword: false },
-  });
-
-  return res.status(200).json({ message: 'Senha atualizada' });
-});
 
 router.post('/sample-data', async (req: AuthedRequest, res) => {
   if (!req.user) {

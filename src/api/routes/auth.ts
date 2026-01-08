@@ -4,7 +4,6 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../db/prisma';
 import { normalizeEmail } from '../../utils/email';
 import { verifyPassword } from '../../utils/password';
-import { getAdminUser } from '../../services/userService';
 
 const router = Router();
 
@@ -40,7 +39,7 @@ router.post('/login', async (req, res) => {
   if (normalizedEmail) {
     const user = await prisma.user.findFirst({
       where: { email: normalizedEmail },
-      select: { telegramId: true, passwordHash: true, mustChangePassword: true },
+      select: { telegramId: true, passwordHash: true },
     });
 
     if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) {
@@ -48,7 +47,7 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ sub: user.telegramId }, JWT_SECRET_VALUE, { expiresIn: '7d' });
-    return res.json({ token, mustChangePassword: user.mustChangePassword });
+    return res.json({ token });
   }
 
   if (password !== ADMIN_PASSWORD) {
@@ -56,8 +55,7 @@ router.post('/login', async (req, res) => {
   }
 
   const token = jwt.sign({ sub: 'admin' }, JWT_SECRET_VALUE, { expiresIn: '7d' });
-  const adminUser = await getAdminUser();
-  return res.json({ token, mustChangePassword: adminUser.mustChangePassword });
+  return res.json({ token });
 });
 
 export default router;
