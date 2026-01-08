@@ -7,6 +7,8 @@ import { normalizeCategoryName } from "../../utils/normalize";
 import { API_TELEGRAM_ID } from "../../utils/systemUsers";
 import { dayjs, TZ } from "../../utils/dates";
 import { getMonthRangeFromMonthYear } from "../../utils/dateRange";
+import { normalizeEmail } from "../../utils/email";
+import { generateTempPassword, hashPassword } from "../../utils/password";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 if (!ADMIN_TOKEN) {
@@ -31,6 +33,71 @@ function requireAdminToken(req: any, res: any) {
   }
   return true;
 }
+
+function requireAdminSecret(req: any, res: any) {
+  if (!ADMIN_TOKEN) {
+    res.status(503).json({ error: "ADMIN_TOKEN nao configurado" });
+    return false;
+  }
+  const token =
+    typeof req.headers["x-admin-secret"] === "string" ? req.headers["x-admin-secret"].trim() : "";
+  if (!token || token !== ADMIN_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+router.post("/users", async (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+
+  const rawEmail = req.body?.email;
+  const normalizedEmail = normalizeEmail(rawEmail);
+  if (!normalizedEmail) {
+    return res.status(400).json({ error: "email invalido ou ausente" });
+  }
+
+  const rawName = req.body?.name;
+  const name =
+    typeof rawName === "string" && rawName.trim().length ? rawName.trim().slice(0, 120) : null;
+
+  let tempPassword =
+    typeof req.body?.tempPassword === "string" ? req.body.tempPassword.trim() : "";
+  if (!tempPassword) {
+    tempPassword = generateTempPassword(12);
+  } else if (tempPassword.length < 8) {
+    return res.status(400).json({ error: "tempPassword deve ter pelo menos 8 caracteres" });
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [{ email: normalizedEmail }, { telegramId: normalizedEmail }],
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return res.status(409).json({ error: "Email ja cadastrado" });
+  }
+
+  const passwordHash = hashPassword(tempPassword);
+  const created = await prisma.user.create({
+    data: {
+      telegramId: normalizedEmail,
+      email: normalizedEmail,
+      name: name ?? undefined,
+      passwordHash,
+      mustChangePassword: true,
+    },
+  });
+
+  return res.status(201).json({
+    id: created.id,
+    email: created.email,
+    name: created.name,
+    tempPassword,
+    mustChangePassword: created.mustChangePassword,
+  });
+});
 
 router.get("/backup", async (req, res) => {
   if (!requireAdminToken(req, res)) return;
