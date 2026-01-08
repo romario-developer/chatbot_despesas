@@ -1,73 +1,50 @@
-import { amountStringToCents } from '../utils/money';
-import { nowBahia, parseDateFromText, TZ, dayjs, normalizeDateOnly } from '../utils/dates';
+import {
+  parseQuickEntryText,
+  type CategoryResolver,
+  type ParsedQuickEntry,
+} from '../domain/quickEntry/parseQuickEntry';
 
-export interface ParsedExpense {
-  amountCents: number;
-  description: string;
-  categoryName: string;
-  date: Date;
-  rawText: string;
-  confidence: 'high' | 'medium' | 'low';
-  issues: string[];
-}
+export type ParsedExpense = ParsedQuickEntry;
 
 const inferenceRules: { keywords: string[]; category: string }[] = [
-  { keywords: ['diesel', 'gasolina', 'combust', 'combustível'], category: 'Combustível' },
-  { keywords: ['mercado', 'supermercado'], category: 'Alimentação' },
-  { keywords: ['funcionário', 'funcionario', 'diária', 'diaria', 'pagamento'], category: 'Funcionários' },
-  { keywords: ['ração', 'racao', 'vacina', 'animal'], category: 'Animais' },
-  { keywords: ['energia', 'luz', 'água', 'agua', 'internet'], category: 'Contas' },
+  { keywords: ['diesel', 'gasolina', 'combust', 'combust¡vel'], category: 'Combust¡vel' },
+  { keywords: ['mercado', 'supermercado'], category: 'Alimenta‡Æo' },
+  { keywords: ['funcion rio', 'funcionario', 'di ria', 'diaria', 'pagamento'], category: 'Funcion rios' },
+  { keywords: ['ra‡Æo', 'racao', 'vacina', 'animal'], category: 'Animais' },
+  { keywords: ['energia', 'luz', ' gua', 'agua', 'internet'], category: 'Contas' },
 ];
 
 export function parseExpenseText(text: string): ParsedExpense {
-  const rawText = text.trim();
-  if (!rawText) {
-    throw new Error('Informe um texto com o gasto.');
-  }
+  const categoryResolver: CategoryResolver = (workingText: string) => {
+    let categoryName = 'Outros';
+    let cleanedText = workingText;
 
-  const amountMatch = rawText.match(/(?:r\$?\s*)?-?\d{1,3}(?:[\.\s]\d{3})*(?:[.,]\d{1,2})|-?\d+(?:[.,]\d{1,2})?/i);
-  if (!amountMatch) {
-    throw new Error('Não encontrei o valor. Reenvie incluindo o valor, ex: "mercado 128,90".');
-  }
-
-  const amountCents = amountStringToCents(amountMatch[0]);
-  if (amountCents === null) {
-    throw new Error('Não consegui entender o valor. Tente usar formato "35" ou "35,50".');
-  }
-
-  let workingText = rawText.replace(amountMatch[0], ' ');
-
-  const dateInfo = parseDateFromText(workingText);
-  if (dateInfo?.matchedText) {
-    workingText = workingText.replace(dateInfo.matchedText, ' ');
-  }
-  const rawDate = dateInfo?.date ? dayjs(dateInfo.date) : nowBahia();
-  const date = normalizeDateOnly(rawDate.toDate()) ?? rawDate.toDate();
-
-  let categoryName = 'Outros';
-  const categoryMatch = workingText.match(/categoria\s+([a-zA-ZÀ-ÿ0-9\s]+)/i);
-  if (categoryMatch) {
-    categoryName = categoryMatch[1].trim() || 'Outros';
-    workingText = workingText.replace(categoryMatch[0], ' ');
-  } else {
-    const lower = workingText.toLowerCase();
-    const inferred = inferenceRules.find((rule) =>
-      rule.keywords.some((word) => lower.includes(word)),
-    );
-    if (inferred) {
-      categoryName = inferred.category;
+    const categoryMatch = cleanedText.match(/categoria\s+([a-zA-Z·-˜0-9\s]+)/i);
+    if (categoryMatch) {
+      categoryName = categoryMatch[1].trim() || 'Outros';
+      cleanedText = cleanedText.replace(categoryMatch[0], ' ');
+    } else {
+      const lower = cleanedText.toLowerCase();
+      const inferred = inferenceRules.find((rule) =>
+        rule.keywords.some((word) => lower.includes(word)),
+      );
+      if (inferred) {
+        categoryName = inferred.category;
+      }
     }
-  }
 
-  const description = workingText.replace(/\s+/g, ' ').trim() || 'Sem descrição';
+    return { categoryName, cleanedText };
+  };
 
-  const issues: string[] = [];
-  if (!description || description === 'Sem descrição') issues.push('missing_description');
-  if (categoryName.toLowerCase() === 'outros') issues.push('ambiguous_category');
-
-  let confidence: ParsedExpense['confidence'] = 'high';
-  if (issues.length === 1) confidence = 'medium';
-  if (issues.length >= 2) confidence = 'low';
-
-  return { amountCents, description, categoryName, date, rawText, confidence, issues };
+  return parseQuickEntryText(text, {
+    amountMatchStrategy: 'first',
+    categoryResolver,
+    defaultCategoryName: 'Outros',
+    defaultDescription: 'Sem descri‡Æo',
+    messages: {
+      emptyText: 'Informe um texto com o gasto.',
+      missingAmount: 'NÆo encontrei o valor. Reenvie incluindo o valor, ex: "mercado 128,90".',
+      invalidAmount: 'NÆo consegui entender o valor. Tente usar formato "35" ou "35,50".',
+    },
+  });
 }

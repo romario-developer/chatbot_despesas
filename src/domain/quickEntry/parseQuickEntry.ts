@@ -1,0 +1,129 @@
+import { amountStringToCents } from '../../utils/money';
+import { dayjs, nowBahia, normalizeDateOnly, parseDateFromText } from '../../utils/dates';
+
+export type QuickEntryIssue = 'missing_description' | 'ambiguous_category';
+export type QuickEntryConfidence = 'high' | 'medium' | 'low';
+
+export interface ParsedQuickEntry {
+  amountCents: number;
+  description: string;
+  categoryName: string;
+  date: Date;
+  rawText: string;
+  confidence: QuickEntryConfidence;
+  issues: QuickEntryIssue[];
+}
+
+export type AmountMatchStrategy = 'first' | 'last';
+
+export type CategoryResolverResult = {
+  categoryName: string;
+  cleanedText?: string;
+};
+
+export type CategoryResolver = (text: string) => CategoryResolverResult | null;
+
+export type QuickEntryErrorCode = 'empty_text' | 'missing_amount' | 'invalid_amount';
+
+export class QuickEntryParseError extends Error {
+  code: QuickEntryErrorCode;
+
+  constructor(code: QuickEntryErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export interface QuickEntryParseOptions {
+  amountMatchStrategy?: AmountMatchStrategy;
+  categoryResolver?: CategoryResolver;
+  defaultCategoryName?: string;
+  defaultDescription?: string;
+  messages?: {
+    emptyText?: string;
+    missingAmount?: string;
+    invalidAmount?: string;
+  };
+}
+
+const AMOUNT_REGEX =
+  /(?:r\$?\s*)?-?\d{1,3}(?:[\.\s]\d{3})*(?:[.,]\d{1,2})|-?\d+(?:[.,]\d{1,2})?/gi;
+
+function selectAmountMatch(rawText: string, strategy: AmountMatchStrategy): RegExpMatchArray | null {
+  const matches = Array.from(rawText.matchAll(AMOUNT_REGEX));
+  if (!matches.length) return null;
+  return strategy === 'last' ? matches[matches.length - 1] : matches[0];
+}
+
+function removeMatch(text: string, match: RegExpMatchArray) {
+  const index = typeof match.index === 'number' ? match.index : text.indexOf(match[0]);
+  if (index < 0) return text;
+  return `${text.slice(0, index)} ${text.slice(index + match[0].length)}`;
+}
+
+export function parseQuickEntryText(
+  text: string,
+  options: QuickEntryParseOptions = {},
+): ParsedQuickEntry {
+  const messages = {
+    emptyText: 'Informe um texto com o gasto.',
+    missingAmount: 'Informe um valor. Ex: mercado 50',
+    invalidAmount: 'Valor invalido. Use 40 ou 40,50.',
+    ...options.messages,
+  };
+
+  const rawText = text.trim();
+  if (!rawText) {
+    throw new QuickEntryParseError('empty_text', messages.emptyText);
+  }
+
+  const amountMatchStrategy = options.amountMatchStrategy ?? 'last';
+  const amountMatch = selectAmountMatch(rawText, amountMatchStrategy);
+  if (!amountMatch) {
+    throw new QuickEntryParseError('missing_amount', messages.missingAmount);
+  }
+
+  const amountCents = amountStringToCents(amountMatch[0]);
+  if (amountCents === null) {
+    throw new QuickEntryParseError('invalid_amount', messages.invalidAmount);
+  }
+
+  let workingText = removeMatch(rawText, amountMatch);
+
+  const dateInfo = parseDateFromText(workingText);
+  if (dateInfo?.matchedText) {
+    workingText = workingText.replace(dateInfo.matchedText, ' ');
+  }
+  const rawDate = dateInfo?.date ? dayjs(dateInfo.date) : nowBahia();
+  const date = normalizeDateOnly(rawDate.toDate()) ?? rawDate.toDate();
+
+  const defaultCategoryName = options.defaultCategoryName ?? 'Outros';
+  const resolver = options.categoryResolver;
+  let categoryName = defaultCategoryName;
+  let categoryText = workingText;
+
+  if (resolver) {
+    const resolved = resolver(workingText);
+    if (resolved?.categoryName) {
+      categoryName = resolved.categoryName;
+      if (typeof resolved.cleanedText === 'string') {
+        categoryText = resolved.cleanedText;
+      }
+    }
+  }
+
+  const cleanedDescription = categoryText.replace(/\s+/g, ' ').trim();
+  const description = cleanedDescription || options.defaultDescription || 'Sem descricao';
+
+  const issues: QuickEntryIssue[] = [];
+  if (!cleanedDescription) issues.push('missing_description');
+  if (categoryName.trim().toLowerCase() === defaultCategoryName.trim().toLowerCase()) {
+    issues.push('ambiguous_category');
+  }
+
+  let confidence: QuickEntryConfidence = 'high';
+  if (issues.length === 1) confidence = 'medium';
+  if (issues.length >= 2) confidence = 'low';
+
+  return { amountCents, description, categoryName, date, rawText, confidence, issues };
+}
