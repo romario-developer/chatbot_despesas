@@ -18,7 +18,7 @@ export interface AuthedRequest extends Request {
   auth?: AuthPayload;
   user?: {
     id: number;
-    telegramId: string;
+    telegramId: string | null;
     telegramChatId?: string | null;
   };
 }
@@ -41,7 +41,11 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
     const user = await getOrCreateUser(telegramId);
 
     req.auth = { sub };
-    req.user = { id: user.id, telegramId: user.telegramId, telegramChatId: user.telegramChatId };
+    req.user = {
+      id: user.id,
+      telegramId: user.telegramId ?? null,
+      telegramChatId: user.telegramChatId,
+    };
 
     next();
   } catch (err) {

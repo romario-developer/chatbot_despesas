@@ -93,6 +93,46 @@ router.post("/users", async (req, res) => {
   });
 });
 
+router.post("/telegram/unlink", async (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+
+  const rawChatId = typeof req.body?.telegramChatId === "string" ? req.body.telegramChatId.trim() : "";
+  const rawUserId = typeof req.body?.telegramUserId === "string" ? req.body.telegramUserId.trim() : "";
+
+  if (!rawChatId && !rawUserId) {
+    return res.status(400).json({ error: "telegramChatId ou telegramUserId obrigatorio" });
+  }
+
+  const orFilters: { telegramChatId?: string; telegramId?: string }[] = [];
+  if (rawChatId) orFilters.push({ telegramChatId: rawChatId });
+  if (rawUserId) orFilters.push({ telegramId: rawUserId });
+
+  const user = await prisma.user.findFirst({
+    where: { OR: orFilters },
+    select: { id: true, email: true, telegramChatId: true, telegramId: true },
+  });
+
+  if (!user) {
+    return res.status(404).json({ error: "Vinculo nao encontrado" });
+  }
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: { telegramChatId: null, telegramId: null },
+    }),
+    prisma.telegramLinkCode.deleteMany({ where: { userId: user.id } }),
+  ]);
+
+  return res.json({
+    ok: true,
+    unlinkedUserId: user.id,
+    email: user.email ?? null,
+    previousTelegramChatId: user.telegramChatId ?? null,
+    previousTelegramUserId: user.telegramId ?? null,
+  });
+});
+
 router.get("/backup", async (req, res) => {
   if (!requireAdminToken(req, res)) return;
 

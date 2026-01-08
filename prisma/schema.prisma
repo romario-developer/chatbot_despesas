@@ -9,7 +9,7 @@ datasource db {
 
 model User {
   id          Int            @id @default(autoincrement())
-  telegramId  String         @unique
+  telegramId  String?        @unique
   telegramChatId String?     @unique
   name        String?
   email       String?        @unique

@@ -39,14 +39,18 @@ router.post('/login', async (req, res) => {
   if (normalizedEmail) {
     const user = await prisma.user.findFirst({
       where: { email: normalizedEmail },
-      select: { telegramId: true, passwordHash: true },
+      select: { telegramId: true, email: true, passwordHash: true },
     });
 
     if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) {
       return res.status(401).json({ error: 'Credenciais invalidas' });
     }
 
-    const token = jwt.sign({ sub: user.telegramId }, JWT_SECRET_VALUE, { expiresIn: '7d' });
+    const subject = user.telegramId ?? user.email;
+    if (!subject) {
+      return res.status(500).json({ error: 'Usuario sem identificador' });
+    }
+    const token = jwt.sign({ sub: subject }, JWT_SECRET_VALUE, { expiresIn: '7d' });
     return res.json({ token });
   }
 

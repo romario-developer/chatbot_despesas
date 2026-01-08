@@ -2,7 +2,7 @@ import { findUserByTelegramIdentifiers } from '../services/telegramLinkService';
 
 export type LinkedTelegramUser = {
   id: number;
-  telegramId: string;
+  telegramId: string | null;
   telegramChatId: string | null;
 };
 
