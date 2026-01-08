@@ -181,7 +181,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
   }
 
-  const data: Prisma.ExpenseUpdateManyMutationInput = {};
+  const data: Prisma.ExpenseUncheckedUpdateManyInput = {};
 
   if (typeof amount !== "undefined") {
     const amountCents = toAmountCents(amount);
