@@ -831,7 +831,7 @@ export function registerCommandHandlers(bot: Bot) {
     let linkInfo: {
       linkId: number;
       linkedUserId: number;
-      linkedTelegramId: string;
+      linkedTelegramId: string | null;
       chatId: string | null;
       createdAt: Date;
     } | null = null;
@@ -851,7 +851,7 @@ export function registerCommandHandlers(bot: Bot) {
         linkInfo = {
           linkId: user.id,
           linkedUserId: user.id,
-          linkedTelegramId: user.telegramId,
+          linkedTelegramId: user.telegramId ?? null,
           chatId: user.telegramChatId,
           createdAt: user.createdAt,
         };
@@ -866,7 +866,7 @@ export function registerCommandHandlers(bot: Bot) {
 
     if (linkInfo) {
       lines.push(
-        `vinculo: linkId=${linkInfo.linkId} userId=${linkInfo.linkedUserId} telegramId=${linkInfo.linkedTelegramId} chatId=${linkInfo.chatId} createdAt=${linkInfo.createdAt.toISOString()}`,
+        `vinculo: linkId=${linkInfo.linkId} userId=${linkInfo.linkedUserId} telegramId=${linkInfo.linkedTelegramId ?? 'n/a'} chatId=${linkInfo.chatId ?? 'n/a'} createdAt=${linkInfo.createdAt.toISOString()}`,
       );
     } else {
       lines.push('vinculo: nao encontrado');
