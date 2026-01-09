@@ -1,4 +1,4 @@
-export function amountStringToCents(raw: string): number | null {
+export function amountStringToNumber(raw: string): number | null {
   const cleaned = raw
     .toLowerCase()
     .replace(/r\$\s*/g, '')
@@ -18,6 +18,12 @@ export function amountStringToCents(raw: string): number | null {
 
   const amount = Number.parseFloat(normalized);
   if (Number.isNaN(amount)) return null;
+  return Number(amount.toFixed(2));
+}
+
+export function amountStringToCents(raw: string): number | null {
+  const amount = amountStringToNumber(raw);
+  if (amount === null) return null;
   return Math.round(amount * 100);
 }
 

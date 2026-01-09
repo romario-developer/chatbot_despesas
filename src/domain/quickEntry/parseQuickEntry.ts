@@ -1,10 +1,11 @@
-import { amountStringToCents } from '../../utils/money';
+import { amountStringToNumber, toAmountCents } from '../../utils/money';
 import { dayjs, nowBahia, normalizeDateOnly, parseDateFromText } from '../../utils/dates';
 
 export type QuickEntryIssue = 'missing_description' | 'ambiguous_category';
 export type QuickEntryConfidence = 'high' | 'medium' | 'low';
 
 export interface ParsedQuickEntry {
+  amount: number;
   amountCents: number;
   description: string;
   categoryName: string;
@@ -83,7 +84,11 @@ export function parseQuickEntryText(
     throw new QuickEntryParseError('missing_amount', messages.missingAmount);
   }
 
-  const amountCents = amountStringToCents(amountMatch[0]);
+  const amount = amountStringToNumber(amountMatch[0]);
+  if (amount === null) {
+    throw new QuickEntryParseError('invalid_amount', messages.invalidAmount);
+  }
+  const amountCents = toAmountCents(amount);
   if (amountCents === null) {
     throw new QuickEntryParseError('invalid_amount', messages.invalidAmount);
   }
@@ -125,5 +130,5 @@ export function parseQuickEntryText(
   if (issues.length === 1) confidence = 'medium';
   if (issues.length >= 2) confidence = 'low';
 
-  return { amountCents, description, categoryName, date, rawText, confidence, issues };
+  return { amount, amountCents, description, categoryName, date, rawText, confidence, issues };
 }

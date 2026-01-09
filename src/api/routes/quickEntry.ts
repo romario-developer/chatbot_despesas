@@ -54,12 +54,14 @@ function mapExpense(expense: {
   category: { name: string };
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, 'expense.amountCents', { allowZero: true });
+  const date = dayjs(expense.date).tz(TZ);
   return {
     id: expense.id,
     amount: centsToNumber(amountCents),
     description: expense.description,
     category: expense.category.name,
-    date: dayjs(expense.date).tz(TZ).format('YYYY-MM-DD'),
+    date: date.format('YYYY-MM-DD'),
+    month: date.format('YYYY-MM'),
     source: expense.source,
     rawText: expense.rawText,
     createdAt: expense.createdAt,
@@ -76,8 +78,8 @@ router.post('/', async (req: AuthedRequest, res) => {
   if (!rawText) {
     return res.status(400).json({ error: '"text" obrigatorio' });
   }
-  if (rawText.length < 3 || rawText.length > 200) {
-    return res.status(400).json({ error: '"text" deve ter entre 3 e 200 caracteres' });
+  if (rawText.length > 200) {
+    return res.status(400).json({ error: '"text" deve ter no maximo 200 caracteres' });
   }
 
   await ensureDefaultCategory(user.id);
@@ -135,10 +137,14 @@ router.post('/', async (req: AuthedRequest, res) => {
 
   console.info(`[quick-entry] userId=${user.id} amountCents=${amountCents}`);
 
+  const entry = mapExpense(expense);
+
   return res.status(201).json({
-    entry: mapExpense(expense),
+    ...entry,
+    entry,
     parsed: {
       description: parsed.description,
+      amount: entry.amount,
       amountCents,
       categoryName: category.name,
       date: dayjs(parsed.date).tz(TZ).format('YYYY-MM-DD'),
