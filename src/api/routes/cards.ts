@@ -116,6 +116,7 @@ router.get('/', async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  console.log('[cards][get] user=%o', req.user);
   console.log('[cards][get] userId=%s', userId);
 
   const cards = await prisma.card.findMany({
@@ -132,6 +133,7 @@ router.post('/', async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  console.log('[cards][post] userId=%s', userId);
   console.log('[cards][post] userId=%s body=%o', userId, req.body ?? {});
 
   const { name, brand, limit, closingDay, dueDay, color, textColor } = req.body ?? {};
