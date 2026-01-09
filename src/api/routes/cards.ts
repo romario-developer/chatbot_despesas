@@ -132,66 +132,80 @@ router.post('/', async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  console.log('[cards][post] userId=%s', userId);
+  console.log('[cards][post] userId=%s body=%o', userId, req.body ?? {});
 
   const { name, brand, limit, closingDay, dueDay, color, textColor } = req.body ?? {};
+  const errors: { field: string; message: string }[] = [];
 
-  if (typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'name obrigatorio' });
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  if (!normalizedName) {
+    errors.push({ field: 'name', message: 'name obrigatorio' });
   }
 
   const normalizedBrand = normalizeBrand(brand);
   if (!normalizedBrand) {
-    return res.status(400).json({ error: 'brand invalido' });
+    errors.push({ field: 'brand', message: 'brand invalido' });
   }
 
   const closing = parseDay(closingDay);
   if (!closing) {
-    return res.status(400).json({ error: 'closingDay invalido (1-31)' });
+    errors.push({ field: 'closingDay', message: 'closingDay invalido (1-31)' });
   }
 
   const due = parseDay(dueDay);
   if (!due) {
-    return res.status(400).json({ error: 'dueDay invalido (1-31)' });
+    errors.push({ field: 'dueDay', message: 'dueDay invalido (1-31)' });
   }
 
   const limitCents = parseLimit(limit);
   if (limitCents === null) {
-    return res.status(400).json({ error: 'limit invalido' });
+    errors.push({ field: 'limit', message: 'limit invalido' });
   }
 
   let normalizedColor = DEFAULT_CARD_COLOR;
   if (typeof color !== 'undefined') {
     const parsedColor = parseHexColor(color);
     if (!parsedColor) {
-      return res.status(400).json({ error: 'color invalido (hex)' });
+      errors.push({ field: 'color', message: 'color invalido (hex)' });
+    } else {
+      normalizedColor = parsedColor;
     }
-    normalizedColor = parsedColor;
   }
 
   let normalizedTextColor: string | null = null;
   if (typeof textColor !== 'undefined') {
     const parsedTextColor = parseHexColor(textColor);
     if (!parsedTextColor) {
-      return res.status(400).json({ error: 'textColor invalido (hex)' });
+      errors.push({ field: 'textColor', message: 'textColor invalido (hex)' });
+    } else {
+      normalizedTextColor = parsedTextColor;
     }
-    normalizedTextColor = parsedTextColor;
   }
 
-  const card = await prisma.card.create({
-    data: {
-      userId,
-      name: name.trim(),
-      brand: normalizedBrand,
-      limit: limitCents,
-      closingDay: closing,
-      dueDay: due,
-      color: normalizedColor,
-      textColor: normalizedTextColor,
-    },
-  });
+  if (errors.length) {
+    return res.status(400).json({ error: 'ValidationError', fields: errors });
+  }
 
-  return res.status(201).json(mapCard(card));
+  try {
+    const card = await prisma.card.create({
+      data: {
+        userId,
+        name: normalizedName,
+        brand: normalizedBrand!,
+        limit: limitCents!,
+        closingDay: closing!,
+        dueDay: due!,
+        color: normalizedColor,
+        textColor: normalizedTextColor,
+      },
+    });
+
+    return res.status(201).json(mapCard(card));
+  } catch (err) {
+    console.error('[cards][post] erro ao salvar cartao', err);
+    const message = err instanceof Error ? err.message : 'Erro ao salvar cartao';
+    return res.status(500).json({ error: message });
+  }
 });
 
 router.put('/:id', async (req: AuthedRequest, res) => {
