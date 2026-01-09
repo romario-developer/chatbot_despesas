@@ -1,0 +1,264 @@
+import { Router } from 'express';
+
+import { prisma } from '../../db/prisma';
+import { nowBahia, TZ } from '../../utils/dates';
+import { centsToNumber, toAmountCents } from '../../utils/money';
+import type { AuthedRequest } from '../middleware/auth';
+
+const router = Router();
+
+const BRAND_VALUES = new Set(['VISA', 'MASTERCARD', 'ELO', 'AMEX', 'OTHER']);
+
+function normalizeBrand(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (!normalized || !BRAND_VALUES.has(normalized)) return null;
+  return normalized;
+}
+
+function parseDay(value: unknown): number | null {
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value)) return null;
+    return value >= 1 && value <= 31 ? value : null;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (!Number.isInteger(parsed)) return null;
+    return parsed >= 1 && parsed <= 31 ? parsed : null;
+  }
+  return null;
+}
+
+function parseLimit(value: unknown): number | null {
+  if (typeof value === 'undefined') return 0;
+  const cents = toAmountCents(value);
+  if (cents === null) return null;
+  return cents >= 0 ? cents : null;
+}
+
+function parseMonthParam(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) return null;
+  return normalized;
+}
+
+function mapCard(card: {
+  id: number;
+  name: string;
+  brand: string;
+  limit: number;
+  closingDay: number;
+  dueDay: number;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: card.id,
+    name: card.name,
+    brand: card.brand,
+    limit: centsToNumber(card.limit),
+    closingDay: card.closingDay,
+    dueDay: card.dueDay,
+    createdAt: card.createdAt,
+    updatedAt: card.updatedAt,
+  };
+}
+
+router.get('/summary', async (req: AuthedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const providedMonth = typeof req.query.month !== 'undefined';
+  const parsedMonth = parseMonthParam(req.query.month);
+  if (providedMonth && !parsedMonth) {
+    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  }
+  const month = parsedMonth ?? nowBahia().tz(TZ).format('YYYY-MM');
+
+  const cards = await prisma.card.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const items = cards.map((card) => ({
+    cardId: card.id,
+    name: card.name,
+    brand: card.brand,
+    limit: centsToNumber(card.limit),
+    closingDay: card.closingDay,
+    dueDay: card.dueDay,
+    spentInMonth: 0,
+  }));
+
+  return res.json({ month, items });
+});
+
+router.get('/', async (req: AuthedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const cards = await prisma.card.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return res.json({ items: cards.map(mapCard) });
+});
+
+router.post('/', async (req: AuthedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { name, brand, limit, closingDay, dueDay } = req.body ?? {};
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'name obrigatorio' });
+  }
+
+  const normalizedBrand = normalizeBrand(brand);
+  if (!normalizedBrand) {
+    return res.status(400).json({ error: 'brand invalido' });
+  }
+
+  const closing = parseDay(closingDay);
+  if (!closing) {
+    return res.status(400).json({ error: 'closingDay invalido (1-31)' });
+  }
+
+  const due = parseDay(dueDay);
+  if (!due) {
+    return res.status(400).json({ error: 'dueDay invalido (1-31)' });
+  }
+
+  const limitCents = parseLimit(limit);
+  if (limitCents === null) {
+    return res.status(400).json({ error: 'limit invalido' });
+  }
+
+  const card = await prisma.card.create({
+    data: {
+      userId,
+      name: name.trim(),
+      brand: normalizedBrand,
+      limit: limitCents,
+      closingDay: closing,
+      dueDay: due,
+    },
+  });
+
+  return res.status(201).json(mapCard(card));
+});
+
+router.put('/:id', async (req: AuthedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID invalido' });
+  }
+
+  const { name, brand, limit, closingDay, dueDay } = req.body ?? {};
+  if (
+    typeof name === 'undefined' &&
+    typeof brand === 'undefined' &&
+    typeof limit === 'undefined' &&
+    typeof closingDay === 'undefined' &&
+    typeof dueDay === 'undefined'
+  ) {
+    return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+  }
+
+  const data: {
+    name?: string;
+    brand?: string;
+    limit?: number;
+    closingDay?: number;
+    dueDay?: number;
+  } = {};
+
+  if (typeof name !== 'undefined') {
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name obrigatorio' });
+    }
+    data.name = name.trim();
+  }
+
+  if (typeof brand !== 'undefined') {
+    const normalizedBrand = normalizeBrand(brand);
+    if (!normalizedBrand) {
+      return res.status(400).json({ error: 'brand invalido' });
+    }
+    data.brand = normalizedBrand;
+  }
+
+  if (typeof closingDay !== 'undefined') {
+    const closing = parseDay(closingDay);
+    if (!closing) {
+      return res.status(400).json({ error: 'closingDay invalido (1-31)' });
+    }
+    data.closingDay = closing;
+  }
+
+  if (typeof dueDay !== 'undefined') {
+    const due = parseDay(dueDay);
+    if (!due) {
+      return res.status(400).json({ error: 'dueDay invalido (1-31)' });
+    }
+    data.dueDay = due;
+  }
+
+  if (typeof limit !== 'undefined') {
+    const limitCents = parseLimit(limit);
+    if (limitCents === null) {
+      return res.status(400).json({ error: 'limit invalido' });
+    }
+    data.limit = limitCents;
+  }
+
+  const updated = await prisma.card.updateMany({
+    where: { id, userId },
+    data,
+  });
+
+  if (!updated.count) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const saved = await prisma.card.findFirst({ where: { id, userId } });
+  if (!saved) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  return res.json(mapCard(saved));
+});
+
+router.delete('/:id', async (req: AuthedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID invalido' });
+  }
+
+  const deleted = await prisma.card.deleteMany({ where: { id, userId } });
+  if (!deleted.count) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  return res.status(204).send();
+});
+
+export default router;
