@@ -1,5 +1,5 @@
 import { amountStringToNumber, toAmountCents } from '../../utils/money';
-import { dayjs, nowBahia, normalizeDateOnly, parseDateFromText } from '../../utils/dates';
+import { dayjs, nowBahia, normalizeDateOnly, parseDateFromText, TZ } from '../../utils/dates';
 
 export type QuickEntryIssue = 'missing_description' | 'ambiguous_category';
 export type QuickEntryConfidence = 'high' | 'medium' | 'low';
@@ -10,6 +10,8 @@ export interface ParsedQuickEntry {
   description: string;
   categoryName: string;
   date: Date;
+  dateKey: string;
+  month: string;
   rawText: string;
   confidence: QuickEntryConfidence;
   issues: QuickEntryIssue[];
@@ -100,7 +102,10 @@ export function parseQuickEntryText(
     workingText = workingText.replace(dateInfo.matchedText, ' ');
   }
   const rawDate = dateInfo?.date ? dayjs(dateInfo.date) : nowBahia();
-  const date = normalizeDateOnly(rawDate.toDate()) ?? rawDate.toDate();
+  const localDate = rawDate.tz(TZ);
+  const dateKey = localDate.format('YYYY-MM-DD');
+  const month = localDate.format('YYYY-MM');
+  const date = normalizeDateOnly(dateKey, TZ) ?? localDate.toDate();
 
   const defaultCategoryName = options.defaultCategoryName ?? 'Outros';
   const resolver = options.categoryResolver;
@@ -130,5 +135,16 @@ export function parseQuickEntryText(
   if (issues.length === 1) confidence = 'medium';
   if (issues.length >= 2) confidence = 'low';
 
-  return { amount, amountCents, description, categoryName, date, rawText, confidence, issues };
+  return {
+    amount,
+    amountCents,
+    description,
+    categoryName,
+    date,
+    dateKey,
+    month,
+    rawText,
+    confidence,
+    issues,
+  };
 }

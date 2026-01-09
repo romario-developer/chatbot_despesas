@@ -147,7 +147,7 @@ router.post('/', async (req: AuthedRequest, res) => {
       amount: entry.amount,
       amountCents,
       categoryName: category.name,
-      date: dayjs(parsed.date).tz(TZ).format('YYYY-MM-DD'),
+      date: parsed.dateKey,
     },
   });
 });
