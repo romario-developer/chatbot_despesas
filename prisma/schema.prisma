@@ -71,6 +71,7 @@ model Expense {
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([userId, date])
 }
 
 model ExpenseDraft {

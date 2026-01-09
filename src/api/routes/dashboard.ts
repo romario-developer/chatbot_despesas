@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { prisma } from '../../db/prisma';
-import { getMonthlySummary } from '../../services/monthlySummaryService';
+import { getPlanningByUserId } from '../../services/planningService';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { getMonthRangeFromMonthYear } from '../../utils/dateRange';
 import { assertValidAmountCents, centsToNumber } from '../../utils/money';
@@ -38,8 +38,8 @@ router.get('/summary', async (req: AuthedRequest, res) => {
 
     const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
 
-    const [summary, totals] = await Promise.all([
-      getMonthlySummary({ userId, month }),
+    const [planning, totals] = await Promise.all([
+      getPlanningByUserId(userId),
       prisma.expense.groupBy({
         where: {
           userId,
@@ -50,21 +50,28 @@ router.get('/summary', async (req: AuthedRequest, res) => {
       }),
     ]);
 
-    const categoryIds = totals.map((item) => item.categoryId);
+    const categoryTotals = new Map<number, number>();
+    let expenseTotalCents = 0;
+    for (const item of totals) {
+      const amountCents = assertValidAmountCents(item._sum.amountCents ?? 0, 'category.amountCents', {
+        allowZero: true,
+      });
+      categoryTotals.set(item.categoryId, amountCents);
+      expenseTotalCents += amountCents;
+    }
+
+    const categoryIds = Array.from(categoryTotals.keys());
     const categories = categoryIds.length
       ? await prisma.category.findMany({ where: { userId, id: { in: categoryIds } } })
       : [];
     const categoryMap = new Map(categories.map((cat) => [cat.id, cat]));
 
-    const byCategory = totals
-      .map((item) => {
-        const category = categoryMap.get(item.categoryId);
+    const byCategory = Array.from(categoryTotals.entries())
+      .map(([categoryId, amountCents]) => {
+        const category = categoryMap.get(categoryId);
         if (!category) return null;
-        const amountCents = assertValidAmountCents(item._sum.amountCents ?? 0, 'category.amountCents', {
-          allowZero: true,
-        });
         return {
-          categoryId: category.id,
+          categoryId,
           categoryName: category.name,
           color: getCategoryColor(category.name),
           total: centsToNumber(amountCents),
@@ -73,9 +80,11 @@ router.get('/summary', async (req: AuthedRequest, res) => {
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .sort((a, b) => b.total - a.total);
 
-    const incomeTotal = summary.salaryTotal + summary.extrasTotal;
-    const expenseTotal = summary.totalExpenses;
-    const balance = summary.balance;
+    const salaryTotal = planning.salaryByMonth[month] ?? 0;
+    const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
+    const incomeTotal = salaryTotal + extrasTotal;
+    const expenseTotal = centsToNumber(expenseTotalCents);
+    const balance = incomeTotal - expenseTotal;
 
     return res.json({
       month,
