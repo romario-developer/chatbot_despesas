@@ -45,6 +45,7 @@ function parseMonthParam(value: unknown): string | null {
 
 function mapCard(card: {
   id: number;
+  userId: number;
   name: string;
   brand: string;
   limit: number;
@@ -55,6 +56,7 @@ function mapCard(card: {
 }) {
   return {
     id: card.id,
+    userId: card.userId,
     name: card.name,
     brand: card.brand,
     limit: centsToNumber(card.limit),
