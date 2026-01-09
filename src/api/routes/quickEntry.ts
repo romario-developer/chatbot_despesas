@@ -10,6 +10,7 @@ import {
 import { assertValidAmountCents, centsToNumber } from '../../utils/money';
 import { dayjs, TZ } from '../../utils/dates';
 import { normalizeCategoryName } from '../../utils/normalize';
+import { inferCategory } from '../../domain/categorizer';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -84,12 +85,20 @@ router.post('/', async (req: AuthedRequest, res) => {
 
   await ensureDefaultCategory(user.id);
   const categories = await listCategories(user.id);
-  const categoryResolver = buildPrefixCategoryResolver(
+  const baseCategoryResolver = buildPrefixCategoryResolver(
     categories.map((category) => ({
       name: category.name,
       normalizedName: category.normalizedName,
     })),
   );
+  let hasExplicitCategory = false;
+  const categoryResolver: CategoryResolver = (text: string) => {
+    const resolved = baseCategoryResolver(text);
+    if (resolved?.categoryName) {
+      hasExplicitCategory = true;
+    }
+    return resolved;
+  };
 
   let parsed;
   try {
@@ -120,7 +129,20 @@ router.post('/', async (req: AuthedRequest, res) => {
     return res.status(422).json({ error: message });
   }
 
-  const category = await getOrCreateCategory(user.id, parsed.categoryName || 'Outros');
+  let categoryName = parsed.categoryName || 'Outros';
+  let categoryInferred = false;
+  let categoryConfidence = 0;
+
+  if (!hasExplicitCategory) {
+    const inference = inferCategory(parsed.description);
+    categoryConfidence = inference.confidence;
+    if (inference.categoryName && inference.confidence >= 0.6) {
+      categoryName = inference.categoryName;
+      categoryInferred = true;
+    }
+  }
+
+  const category = await getOrCreateCategory(user.id, categoryName || 'Outros');
 
   const expense = await prisma.expense.create({
     data: {
@@ -142,6 +164,8 @@ router.post('/', async (req: AuthedRequest, res) => {
   return res.status(201).json({
     ...entry,
     entry,
+    categoryInferred,
+    categoryConfidence,
     parsed: {
       description: parsed.description,
       amount: entry.amount,
