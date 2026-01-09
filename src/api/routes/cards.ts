@@ -8,6 +8,7 @@ import type { AuthedRequest } from '../middleware/auth';
 const router = Router();
 
 const BRAND_VALUES = new Set(['VISA', 'MASTERCARD', 'ELO', 'AMEX', 'OTHER']);
+const DEFAULT_CARD_COLOR = '#4F46E5';
 
 function normalizeBrand(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -36,6 +37,13 @@ function parseLimit(value: unknown): number | null {
   return cents >= 0 ? cents : null;
 }
 
+function parseHexColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (!/^#([0-9A-F]{3}|[0-9A-F]{6})$/.test(normalized)) return null;
+  return normalized;
+}
+
 function parseMonthParam(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -51,6 +59,8 @@ function mapCard(card: {
   limit: number;
   closingDay: number;
   dueDay: number;
+  color: string;
+  textColor: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -62,6 +72,8 @@ function mapCard(card: {
     limit: centsToNumber(card.limit),
     closingDay: card.closingDay,
     dueDay: card.dueDay,
+    color: card.color,
+    textColor: card.textColor,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
   };
@@ -118,7 +130,7 @@ router.post('/', async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { name, brand, limit, closingDay, dueDay } = req.body ?? {};
+  const { name, brand, limit, closingDay, dueDay, color, textColor } = req.body ?? {};
 
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'name obrigatorio' });
@@ -144,6 +156,24 @@ router.post('/', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'limit invalido' });
   }
 
+  let normalizedColor = DEFAULT_CARD_COLOR;
+  if (typeof color !== 'undefined') {
+    const parsedColor = parseHexColor(color);
+    if (!parsedColor) {
+      return res.status(400).json({ error: 'color invalido (hex)' });
+    }
+    normalizedColor = parsedColor;
+  }
+
+  let normalizedTextColor: string | null = null;
+  if (typeof textColor !== 'undefined') {
+    const parsedTextColor = parseHexColor(textColor);
+    if (!parsedTextColor) {
+      return res.status(400).json({ error: 'textColor invalido (hex)' });
+    }
+    normalizedTextColor = parsedTextColor;
+  }
+
   const card = await prisma.card.create({
     data: {
       userId,
@@ -152,6 +182,8 @@ router.post('/', async (req: AuthedRequest, res) => {
       limit: limitCents,
       closingDay: closing,
       dueDay: due,
+      color: normalizedColor,
+      textColor: normalizedTextColor,
     },
   });
 
@@ -169,13 +201,15 @@ router.put('/:id', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'ID invalido' });
   }
 
-  const { name, brand, limit, closingDay, dueDay } = req.body ?? {};
+  const { name, brand, limit, closingDay, dueDay, color, textColor } = req.body ?? {};
   if (
     typeof name === 'undefined' &&
     typeof brand === 'undefined' &&
     typeof limit === 'undefined' &&
     typeof closingDay === 'undefined' &&
-    typeof dueDay === 'undefined'
+    typeof dueDay === 'undefined' &&
+    typeof color === 'undefined' &&
+    typeof textColor === 'undefined'
   ) {
     return res.status(400).json({ error: 'Nenhum campo para atualizar' });
   }
@@ -186,6 +220,8 @@ router.put('/:id', async (req: AuthedRequest, res) => {
     limit?: number;
     closingDay?: number;
     dueDay?: number;
+    color?: string;
+    textColor?: string | null;
   } = {};
 
   if (typeof name !== 'undefined') {
@@ -225,6 +261,22 @@ router.put('/:id', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'limit invalido' });
     }
     data.limit = limitCents;
+  }
+
+  if (typeof color !== 'undefined') {
+    const parsedColor = parseHexColor(color);
+    if (!parsedColor) {
+      return res.status(400).json({ error: 'color invalido (hex)' });
+    }
+    data.color = parsedColor;
+  }
+
+  if (typeof textColor !== 'undefined') {
+    const parsedTextColor = parseHexColor(textColor);
+    if (!parsedTextColor) {
+      return res.status(400).json({ error: 'textColor invalido (hex)' });
+    }
+    data.textColor = parsedTextColor;
   }
 
   const updated = await prisma.card.updateMany({
