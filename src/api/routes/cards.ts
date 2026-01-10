@@ -172,6 +172,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
           date: { gte: cycleStart.toDate(), lte: cycleEndEnd.toDate() },
         },
         _sum: { amountCents: true },
+        _count: { _all: true },
       });
       const paymentTotals = await sumCardPayments(card.id, cycleEndStart.toDate());
       const expenseCents = expenseTotals._sum.amountCents ?? 0;
@@ -187,6 +188,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
         invoiceTotal: centsToNumber(netCents),
+        entriesCount: expenseTotals._count._all ?? 0,
       };
     }),
   );
