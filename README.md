@@ -130,4 +130,4 @@ curl -H "Authorization: Bearer $TOKEN" \
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.
-- Deploy no Render usa `npm run start:render` (faz `prisma migrate deploy` antes de subir o servidor).
+- `npm start` e `npm run start:render` rodam `npx prisma migrate deploy` antes de subir o servidor, garantindo que as migrations pendentes (como as de CardPayment e InstallmentGroup) sejam aplicadas.
