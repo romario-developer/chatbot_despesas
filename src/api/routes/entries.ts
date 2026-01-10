@@ -7,6 +7,12 @@ import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { getMonthRangeFromMonthYear, getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
+import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod, PaymentMethod } from "../../utils/paymentMethod";
+import {
+  CARD_SELECT,
+  CardSummary,
+  findCardByIdForUser,
+} from "../../services/cardService";
 
 const router = Router();
 
@@ -16,23 +22,36 @@ function parseDateOnly(dateStr: unknown): Date | null {
   return normalized;
 }
 
+function mapCard(card: CardSummary | null | undefined) {
+  if (!card) return null;
+  return {
+    id: card.id,
+    name: card.name,
+    brand: card.brand,
+    color: card.color,
+  };
+}
+
 function mapExpense(expense: {
   id: number;
   amountCents: number;
+  paymentMethod: PaymentMethod;
+  cardId: number | null;
   description: string;
   date: Date;
   source: string;
   rawText: string;
   createdAt: Date;
   category: { name: string };
+  card?: CardSummary | null;
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, "expense.amountCents", { allowZero: true });
   return {
     id: expense.id,
     amount: centsToNumber(amountCents),
-    paymentMethod: "OTHER",
-    cardId: null,
-    card: null,
+    paymentMethod: expense.paymentMethod,
+    cardId: expense.cardId ?? null,
+    card: mapCard(expense.card),
     description: expense.description,
     category: expense.category.name,
     date: dayjs(expense.date).tz(TZ).format("YYYY-MM-DD"),
@@ -42,16 +61,45 @@ function mapExpense(expense: {
   };
 }
 
-const LEGACY_EXPENSE_SELECT = {
+const EXPENSE_SELECT = {
   id: true,
   amountCents: true,
+  paymentMethod: true,
+  cardId: true,
   description: true,
   date: true,
   source: true,
   rawText: true,
   createdAt: true,
   category: { select: { name: true } },
+  card: { select: CARD_SELECT },
 } as const;
+
+async function resolveCardIdForUser(userId: number, value: unknown) {
+  if (typeof value === "undefined") {
+    return { cardId: undefined as number | null | undefined };
+  }
+  if (value === null) {
+    return { cardId: null as number | null };
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : NaN;
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return { error: { status: 400, message: '"cardId" deve ser inteiro > 0' } };
+  }
+
+  const card = await findCardByIdForUser(userId, parsed);
+  if (!card) {
+    return { error: { status: 403, message: "Cartao nao pertence ao usuario" } };
+  }
+
+  return { cardId: card.id };
+}
 
 function parseMonthParam(value: unknown): { year: number; month: number } | null {
   if (Array.isArray(value)) {
@@ -130,11 +178,25 @@ router.get("/", async (req: AuthedRequest, res) => {
     });
   }
 
+  if (typeof req.query.cardId !== "undefined") {
+    const rawCardId = Array.isArray(req.query.cardId) ? req.query.cardId[0] : req.query.cardId;
+    const parsed =
+      typeof rawCardId === "number"
+        ? rawCardId
+        : typeof rawCardId === "string"
+          ? Number.parseInt(rawCardId, 10)
+          : NaN;
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return res.status(400).json({ error: 'Parametro "cardId" invalido' });
+    }
+    filters.push({ cardId: parsed });
+  }
+
   const where: Prisma.ExpenseWhereInput = filters.length ? { AND: filters } : {};
 
   const expenses = await prisma.expense.findMany({
     where,
-    select: LEGACY_EXPENSE_SELECT,
+    select: EXPENSE_SELECT,
     orderBy: { date: "desc" },
   });
 
@@ -155,7 +217,7 @@ router.get("/:id", async (req: AuthedRequest, res) => {
 
   const expense = await prisma.expense.findFirst({
     where: { id, userId: user.id },
-    select: LEGACY_EXPENSE_SELECT,
+    select: EXPENSE_SELECT,
   });
 
   if (!expense) {
@@ -172,6 +234,15 @@ router.post("/", async (req: AuthedRequest, res) => {
   }
 
   const { amount, description, category, date } = req.body ?? {};
+  const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
+  if (typeof req.body?.paymentMethod !== "undefined" && !paymentMethod) {
+    return res.status(400).json({ error: "paymentMethod invalido" });
+  }
+
+  const cardCheck = await resolveCardIdForUser(user.id, req.body?.cardId);
+  if (cardCheck.error) {
+    return res.status(cardCheck.error.status).json({ error: cardCheck.error.message });
+  }
 
   const amountCents = toAmountCents(amount);
   if (!amountCents || amountCents <= 0) {
@@ -198,12 +269,14 @@ router.post("/", async (req: AuthedRequest, res) => {
       userId: user.id,
       categoryId: categoryRow.id,
       amountCents,
+      paymentMethod: paymentMethod ?? DEFAULT_PAYMENT_METHOD,
+      ...(typeof cardCheck.cardId !== "undefined" ? { cardId: cardCheck.cardId } : {}),
       description: description.trim(),
       date: parsedDate,
       rawText: description.trim(),
       source: "manual",
     },
-    select: LEGACY_EXPENSE_SELECT,
+    select: EXPENSE_SELECT,
   });
 
   return res.status(201).json(mapExpense(expense));
@@ -221,12 +294,23 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   }
 
   const { amount, description, category, date } = req.body ?? {};
+  const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
+  if (typeof req.body?.paymentMethod !== "undefined" && !paymentMethod) {
+    return res.status(400).json({ error: "paymentMethod invalido" });
+  }
+
+  const cardCheck = await resolveCardIdForUser(user.id, req.body?.cardId);
+  if (cardCheck.error) {
+    return res.status(cardCheck.error.status).json({ error: cardCheck.error.message });
+  }
 
   if (
     typeof amount === "undefined" &&
     typeof description === "undefined" &&
     typeof category === "undefined" &&
-    typeof date === "undefined"
+    typeof date === "undefined" &&
+    typeof req.body?.paymentMethod === "undefined" &&
+    typeof req.body?.cardId === "undefined"
   ) {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
   }
@@ -265,6 +349,14 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     data.categoryId = categoryRow.id;
   }
 
+  if (typeof req.body?.paymentMethod !== "undefined") {
+    data.paymentMethod = paymentMethod!;
+  }
+
+  if (typeof cardCheck.cardId !== "undefined") {
+    data.cardId = cardCheck.cardId;
+  }
+
   const updated = await prisma.expense.updateMany({
     where: { id, userId: user.id },
     data,
@@ -276,7 +368,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
 
   const saved = await prisma.expense.findFirst({
     where: { id, userId: user.id },
-    select: LEGACY_EXPENSE_SELECT,
+    select: EXPENSE_SELECT,
   });
 
   if (!saved) {
