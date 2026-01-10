@@ -89,6 +89,7 @@ model Expense {
   @@index([userId, createdAt])
   @@index([userId, date])
   @@index([cardId])
+  @@index([userId, cardId, date])
   @@index([date])
 }
 

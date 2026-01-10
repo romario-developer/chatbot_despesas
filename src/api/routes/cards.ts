@@ -1,8 +1,9 @@
 import { Router } from 'express';
 
 import { prisma } from '../../db/prisma';
-import { nowBahia, TZ } from '../../utils/dates';
+import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { getCardCycleRange } from '../../domain/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -108,6 +109,57 @@ router.get('/summary', async (req: AuthedRequest, res) => {
   }));
 
   return res.json({ month, items });
+});
+
+router.get('/invoices', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const rawAsOf = Array.isArray(req.query.asOf) ? req.query.asOf[0] : req.query.asOf;
+  const asOfString = typeof rawAsOf === 'string' ? rawAsOf.trim() : undefined;
+  const asOfCandidate = asOfString ? dayjs.tz(asOfString, 'YYYY-MM-DD', TZ) : undefined;
+  const asOfBase = asOfCandidate ?? nowBahia().tz(TZ);
+  if (asOfString && (!asOfCandidate || !asOfCandidate.isValid())) {
+    return res.status(400).json({ error: 'Parametro "asOf" invalido. Use YYYY-MM-DD.' });
+  }
+  const asOf = asOfBase.startOf('day');
+
+  const cards = await prisma.card.findMany({
+    where: { userId },
+    orderBy: { name: 'asc' },
+  });
+
+  const invoices = await Promise.all(
+    cards.map(async (card) => {
+      const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
+      const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
+      const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day');
+      const totals = await prisma.expense.aggregate({
+        where: {
+          userId,
+          cardId: card.id,
+          paymentMethod: 'CREDIT',
+          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
+        },
+        _sum: { amountCents: true },
+      });
+      return {
+        cardId: card.id,
+        name: card.name,
+        brand: card.brand,
+        color: card.color,
+        closingDay: card.closingDay,
+        dueDay: card.dueDay,
+        cycleStart: cycle.startDate,
+        cycleEnd: cycle.endDate,
+        invoiceTotal: centsToNumber(totals._sum.amountCents ?? 0),
+      };
+    }),
+  );
+
+  return res.json({ asOf: asOf.format('YYYY-MM-DD'), invoices });
 });
 
 router.get('/', async (req: AuthedRequest, res) => {

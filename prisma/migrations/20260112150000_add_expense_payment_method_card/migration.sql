@@ -7,6 +7,7 @@ ALTER TABLE "Expense" ADD COLUMN "paymentMethod" "PaymentMethod" NOT NULL DEFAUL
 CREATE INDEX "Expense_cardId_idx" ON "Expense"("cardId");
 CREATE INDEX "Expense_date_idx" ON "Expense"("date");
 CREATE INDEX "Expense_userId_month_idx" ON "Expense"("userId", date_trunc('month', "date"));
+CREATE INDEX "Expense_user_card_date_idx" ON "Expense"("userId", "cardId", "date");
 
 ALTER TABLE "Expense" ADD CONSTRAINT "Expense_cardId_fkey" FOREIGN KEY ("cardId") REFERENCES "Card"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
