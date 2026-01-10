@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../../db/prisma';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { Prisma } from '@prisma/client';
 import { getCardCycleRange } from '../../domain/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
 
@@ -131,6 +132,31 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
     orderBy: { name: 'asc' },
   });
 
+  async function sumCardPayments(cardId: number, cycleEndStart: Date) {
+    try {
+      return await prisma.cardPayment.aggregate({
+        where: {
+          userId,
+          cardId,
+          cycleEnd: cycleEndStart,
+        },
+        _sum: { amountCents: true },
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.message.includes('CardPayment')
+      ) {
+        console.warn('[cards][invoices] cardPayment table missing, skipping payments', {
+          cardId,
+          error: err.message,
+        });
+        return { _sum: { amountCents: 0 } };
+      }
+      throw err;
+    }
+  }
+
   const invoices = await Promise.all(
     cards.map(async (card) => {
       const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
@@ -147,14 +173,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         },
         _sum: { amountCents: true },
       });
-      const paymentTotals = await prisma.cardPayment.aggregate({
-        where: {
-          userId,
-          cardId: card.id,
-          cycleEnd: cycleEndStart.toDate(),
-        },
-        _sum: { amountCents: true },
-      });
+      const paymentTotals = await sumCardPayments(card.id, cycleEndStart.toDate());
       const expenseCents = expenseTotals._sum.amountCents ?? 0;
       const paymentCents = paymentTotals._sum.amountCents ?? 0;
       const netCents = Math.max(0, expenseCents - paymentCents);
