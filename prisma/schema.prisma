@@ -64,6 +64,7 @@ model Card {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses Expense[]
+  expenseDrafts ExpenseDraft[]
 
   @@index([userId, createdAt])
 }
