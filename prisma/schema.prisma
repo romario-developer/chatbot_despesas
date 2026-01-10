@@ -67,6 +67,7 @@ model Card {
   expenses Expense[]
   expenseDrafts ExpenseDraft[]
   payments CardPayment[]
+  installmentGroups InstallmentGroup[]
 
   @@index([userId, createdAt])
 }
@@ -83,16 +84,21 @@ model Expense {
   source        String
   rawText       String
   createdAt     DateTime      @default(now())
+  installmentGroupId String?
+  installmentIndex   Int  @default(1)
+  installmentsTotal  Int  @default(1)
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   card     Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  installmentGroup InstallmentGroup? @relation(fields: [installmentGroupId], references: [id])
 
   @@index([userId, createdAt])
   @@index([userId, date])
   @@index([cardId])
   @@index([userId, cardId, date])
   @@index([date])
+  @@index([installmentGroupId])
 }
 
 model ExpenseDraft {
@@ -112,6 +118,22 @@ model ExpenseDraft {
 
   @@index([userId, createdAt])
   @@index([cardId])
+}
+
+model InstallmentGroup {
+  id                 String    @id @default(cuid())
+  userId             Int
+  cardId             Int
+  descriptionBase    String
+  totalAmountCents   Int
+  installmentsTotal  Int
+  createdAt          DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+
+  @@index([userId, cardId])
 }
 
 model CardPayment {

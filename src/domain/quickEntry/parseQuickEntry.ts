@@ -19,6 +19,7 @@ export interface ParsedQuickEntry {
   paymentMethod?: PaymentMethod;
   cardNameGuess?: string;
   cardId?: number | null;
+  installmentsTotal?: number;
 }
 
 export type AmountMatchStrategy = 'first' | 'last';

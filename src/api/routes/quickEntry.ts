@@ -7,6 +7,7 @@ import {
   QuickEntryParseError,
   type CategoryResolver,
 } from '../../domain/quickEntry/parseQuickEntry';
+import { parseInstallments } from '../../domain/quickEntryInstallments';
 import { parsePayment } from '../../domain/quickEntryPayment';
 import { assertValidAmountCents, centsToNumber } from '../../utils/money';
 import { dayjs, TZ } from '../../utils/dates';
@@ -59,6 +60,9 @@ function mapExpense(expense: {
   createdAt: Date;
   category: { name: string };
   card?: CardSummary | null;
+  installmentGroupId?: string | null;
+  installmentIndex?: number | null;
+  installmentsTotal?: number | null;
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, 'expense.amountCents', { allowZero: true });
   const date = dayjs(expense.date).tz(TZ);
@@ -75,7 +79,16 @@ function mapExpense(expense: {
     source: expense.source,
     rawText: expense.rawText,
     createdAt: expense.createdAt,
+    installmentGroupId: expense.installmentGroupId ?? null,
+    installmentIndex: expense.installmentIndex ?? null,
+    installmentsTotal: expense.installmentsTotal ?? 1,
   };
+}
+
+function buildInstallmentDate(base: ReturnType<typeof dayjs>, offset: number) {
+  const candidate = base.add(offset, 'month');
+  const desiredDay = Math.min(base.date(), candidate.endOf('month').date());
+  return candidate.date(desiredDay).startOf('day');
 }
 
 router.post('/', async (req: AuthedRequest, res) => {
@@ -109,7 +122,8 @@ router.post('/', async (req: AuthedRequest, res) => {
     return resolved;
   };
 
-  const paymentInfo = parsePayment(rawText);
+  const installmentInfo = parseInstallments(rawText);
+  const paymentInfo = parsePayment(installmentInfo.cleanedText);
 
   let parsed;
   try {
@@ -157,10 +171,78 @@ router.post('/', async (req: AuthedRequest, res) => {
   parsed.paymentMethod = paymentInfo.paymentMethod ?? DEFAULT_PAYMENT_METHOD;
   parsed.cardNameGuess = paymentInfo.cardNameGuess;
   parsed.rawText = rawText;
+  parsed.installmentsTotal = installmentInfo.installmentsTotal ?? 1;
   const matchedCard =
     parsed.paymentMethod === 'CREDIT'
       ? await findCardByNameGuess(user.id, parsed.cardNameGuess)
       : null;
+
+  const installmentsTotal = parsed.installmentsTotal ?? 1;
+  const shouldInstall =
+    installmentsTotal > 1 && parsed.paymentMethod === 'CREDIT' && matchedCard;
+
+  if (shouldInstall) {
+    const group = await prisma.installmentGroup.create({
+      data: {
+        userId: user.id,
+        cardId: matchedCard!.id,
+        descriptionBase: parsed.description || 'Sem descricao',
+        totalAmountCents: amountCents,
+        installmentsTotal,
+      },
+    });
+    const baseDate = dayjs(parsed.date).tz(TZ);
+    const baseAmount = Math.floor(amountCents / installmentsTotal);
+    const remainder = amountCents - baseAmount * installmentsTotal;
+    const installmentAmounts = Array.from({ length: installmentsTotal }, (_, index) =>
+      index === installmentsTotal - 1 ? baseAmount + remainder : baseAmount,
+    );
+
+    const created = await Promise.all(
+      installmentAmounts.map(async (installmentAmount, index) => {
+        const installmentDate = buildInstallmentDate(baseDate, index);
+        const entry = await prisma.expense.create({
+          data: {
+            userId: user.id,
+            categoryId: category.id,
+            amountCents: installmentAmount,
+            paymentMethod: 'CREDIT',
+            cardId: matchedCard!.id,
+            description: `${parsed.description} (${index + 1}/${installmentsTotal})`,
+            date: installmentDate.toDate(),
+            source: 'pwa-quick',
+            rawText: parsed.rawText,
+            installmentGroupId: group.id,
+            installmentIndex: index + 1,
+            installmentsTotal,
+          },
+          include: { category: true, card: { select: CARD_SELECT } },
+        });
+        return mapExpense(entry);
+      }),
+    );
+
+    console.info(
+      `[quick-entry] userId=${user.id} amountCents=${amountCents} installments=${installmentsTotal}`,
+    );
+
+    return res.status(201).json({
+      created,
+      installmentGroupId: group.id,
+      totalAmount: centsToNumber(amountCents),
+      installmentsTotal,
+      categoryInferred,
+      categoryConfidence,
+      parsed: {
+        description: parsed.description,
+        amount: centsToNumber(amountCents),
+        amountCents,
+        categoryName: category.name,
+        date: parsed.dateKey,
+        installmentsTotal,
+      },
+    });
+  }
 
   const expense = await prisma.expense.create({
     data: {

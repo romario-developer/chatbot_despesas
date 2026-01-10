@@ -3,6 +3,7 @@ import {
   type CategoryResolver,
   type ParsedQuickEntry,
 } from '../domain/quickEntry/parseQuickEntry';
+import { parseInstallments } from '../domain/quickEntryInstallments';
 import { parsePayment } from '../domain/quickEntryPayment';
 import { DEFAULT_PAYMENT_METHOD } from '../utils/paymentMethod';
 
@@ -41,7 +42,8 @@ export function parseExpenseText(text: string): ParsedExpense {
     return { categoryName, cleanedText };
   };
 
-  const paymentInfo = parsePayment(text);
+  const installmentInfo = parseInstallments(text);
+  const paymentInfo = parsePayment(installmentInfo.cleanedText);
   const parsed = parseQuickEntryText(paymentInfo.cleanedText, {
     amountMatchStrategy: 'first',
     categoryResolver,
@@ -56,5 +58,6 @@ export function parseExpenseText(text: string): ParsedExpense {
   parsed.paymentMethod = paymentInfo.paymentMethod ?? DEFAULT_PAYMENT_METHOD;
   parsed.cardNameGuess = paymentInfo.cardNameGuess;
   parsed.rawText = text;
+  parsed.installmentsTotal = installmentInfo.installmentsTotal ?? 1;
   return parsed;
 }
