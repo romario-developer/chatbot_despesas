@@ -135,16 +135,29 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
     cards.map(async (card) => {
       const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
       const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
-      const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day');
-      const totals = await prisma.expense.aggregate({
+      const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ);
+      const cycleEndStart = cycleEnd.startOf('day');
+      const cycleEndEnd = cycleEnd.endOf('day');
+      const expenseTotals = await prisma.expense.aggregate({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
+          date: { gte: cycleStart.toDate(), lte: cycleEndEnd.toDate() },
         },
         _sum: { amountCents: true },
       });
+      const paymentTotals = await prisma.cardPayment.aggregate({
+        where: {
+          userId,
+          cardId: card.id,
+          cycleEnd: cycleEndStart.toDate(),
+        },
+        _sum: { amountCents: true },
+      });
+      const expenseCents = expenseTotals._sum.amountCents ?? 0;
+      const paymentCents = paymentTotals._sum.amountCents ?? 0;
+      const netCents = Math.max(0, expenseCents - paymentCents);
       return {
         cardId: card.id,
         name: card.name,
@@ -154,12 +167,75 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         dueDay: card.dueDay,
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
-        invoiceTotal: centsToNumber(totals._sum.amountCents ?? 0),
+        invoiceTotal: centsToNumber(netCents),
       };
     }),
   );
 
   return res.json({ asOf: asOf.format('YYYY-MM-DD'), invoices });
+});
+
+router.post('/payments', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const { cardId, amount, paymentDate } = req.body ?? {};
+  const parsedCardId =
+    typeof cardId === 'number'
+      ? cardId
+      : typeof cardId === 'string'
+        ? Number.parseInt(cardId.trim(), 10)
+        : NaN;
+  if (!Number.isInteger(parsedCardId) || parsedCardId <= 0) {
+    return res.status(400).json({ error: '"cardId" invalido' });
+  }
+
+  const card = await prisma.card.findFirst({
+    where: { id: parsedCardId, userId },
+    select: { id: true, closingDay: true },
+  });
+  if (!card) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const amountCents = toAmountCents(amount);
+  if (!amountCents || amountCents <= 0) {
+    return res.status(400).json({ error: 'amount deve ser maior que zero' });
+  }
+
+  const rawDate =
+    typeof paymentDate === 'string' && paymentDate.trim() ? paymentDate.trim() : undefined;
+  const parsedDate = rawDate
+    ? dayjs.tz(rawDate, 'YYYY-MM-DD', TZ)
+    : nowBahia().tz(TZ);
+  if (!parsedDate.isValid()) {
+    return res.status(400).json({ error: '"paymentDate" invalido. Use YYYY-MM-DD.' });
+  }
+  const resolvedDate = parsedDate.startOf('day');
+
+  const cycle = getCardCycleRange(resolvedDate.toDate(), card.closingDay);
+  const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).startOf('day');
+
+  const payment = await prisma.cardPayment.create({
+    data: {
+      userId,
+      cardId: card.id,
+      amountCents,
+      paymentDate: resolvedDate.toDate(),
+      cycleEnd: cycleEnd.toDate(),
+    },
+  });
+
+  return res.status(201).json({
+    id: payment.id,
+    cardId: payment.cardId,
+    amount: centsToNumber(payment.amountCents),
+    paymentDate: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
+    cycleEnd: dayjs(payment.cycleEnd).tz(TZ).format('YYYY-MM-DD'),
+    createdAt: payment.createdAt,
+  });
 });
 
 router.get('/', async (req: AuthedRequest, res) => {

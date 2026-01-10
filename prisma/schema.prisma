@@ -65,6 +65,7 @@ model Card {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses Expense[]
   expenseDrafts ExpenseDraft[]
+  payments CardPayment[]
 
   @@index([userId, createdAt])
 }
@@ -110,6 +111,21 @@ model ExpenseDraft {
 
   @@index([userId, createdAt])
   @@index([cardId])
+}
+
+model CardPayment {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  cardId      Int
+  amountCents Int
+  paymentDate DateTime
+  cycleEnd    DateTime
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, cardId, cycleEnd])
 }
 
 model UserSession {
