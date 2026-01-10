@@ -3,6 +3,7 @@ import { parseExpenseText } from '../services/parseExpenseText';
 import { formatCurrency } from '../utils/money';
 import { formatDate, dayjs, TZ } from '../utils/dates';
 import { createDraftFromParsed, getDraftForUser, updateDraft } from '../services/draftService';
+import { findCardByNameGuess } from '../services/cardService';
 import { confirmationKeyboard, editKeyboard } from './keyboards';
 import { clearSession, getSessionByUserId } from '../services/sessionService';
 import { getOrCreateCategory } from '../services/categoryService';
@@ -187,6 +188,10 @@ export function registerMessageHandlers(bot: Bot) {
 
     try {
       const parsed = parseExpenseText(text);
+      if (parsed.cardNameGuess && parsed.paymentMethod === 'CREDIT') {
+        const matchedCard = await findCardByNameGuess(linkedUser.id, parsed.cardNameGuess);
+        parsed.cardId = matchedCard?.id ?? null;
+      }
       const { draft } = await createDraftFromParsed(linkedUser.id, parsed);
 
       const summary = buildSummary(draft);

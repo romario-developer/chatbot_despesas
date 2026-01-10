@@ -100,10 +100,14 @@ model ExpenseDraft {
   date        DateTime
   categoryId  Int
   category    Category  @relation(fields: [categoryId], references: [id])
+  cardId      Int?
+  paymentMethod PaymentMethod @default(OTHER)
+  card        Card?     @relation(fields: [cardId], references: [id], onDelete: SetNull)
   rawText     String
   createdAt   DateTime  @default(now())
 
   @@index([userId, createdAt])
+  @@index([cardId])
 }
 
 model UserSession {

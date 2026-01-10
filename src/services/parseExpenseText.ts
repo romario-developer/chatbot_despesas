@@ -3,6 +3,8 @@ import {
   type CategoryResolver,
   type ParsedQuickEntry,
 } from '../domain/quickEntry/parseQuickEntry';
+import { parsePayment } from '../domain/quickEntryPayment';
+import { DEFAULT_PAYMENT_METHOD } from '../utils/paymentMethod';
 
 export type ParsedExpense = ParsedQuickEntry;
 
@@ -39,7 +41,8 @@ export function parseExpenseText(text: string): ParsedExpense {
     return { categoryName, cleanedText };
   };
 
-  return parseQuickEntryText(text, {
+  const paymentInfo = parsePayment(text);
+  const parsed = parseQuickEntryText(paymentInfo.cleanedText, {
     amountMatchStrategy: 'first',
     categoryResolver,
     defaultCategoryName: 'Outros',
@@ -50,4 +53,8 @@ export function parseExpenseText(text: string): ParsedExpense {
       invalidAmount: 'N\u00e3o consegui entender o valor. Tente usar formato "35" ou "35,50".',
     },
   });
+  parsed.paymentMethod = paymentInfo.paymentMethod ?? DEFAULT_PAYMENT_METHOD;
+  parsed.cardNameGuess = paymentInfo.cardNameGuess;
+  parsed.rawText = text;
+  return parsed;
 }

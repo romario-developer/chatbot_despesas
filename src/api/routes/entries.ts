@@ -8,6 +8,11 @@ import { AuthedRequest } from "../middleware/auth";
 import { getMonthRangeFromMonthYear, getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod } from "../../utils/paymentMethod";
+import {
+  CARD_SELECT,
+  CardSummary,
+  findCardByIdForUser,
+} from "../../services/cardService";
 
 const router = Router();
 
@@ -16,15 +21,6 @@ function parseDateOnly(dateStr: unknown): Date | null {
   const normalized = normalizeDateOnly(dateStr, TZ);
   return normalized;
 }
-
-const CARD_SELECT = { id: true, name: true, brand: true, color: true } as const;
-
-type CardSummary = {
-  id: number;
-  name: string;
-  brand: string;
-  color: string;
-};
 
 function mapCard(card: CardSummary | null | undefined) {
   if (!card) return null;
@@ -99,10 +95,7 @@ async function resolveCardIdForUser(userId: number, value: unknown) {
     return { error: { status: 400, message: '"cardId" deve ser inteiro > 0' } };
   }
 
-  const card = await prisma.card.findFirst({
-    where: { id: parsed, userId },
-    select: { id: true },
-  });
+  const card = await findCardByIdForUser(userId, parsed);
   if (!card) {
     return { error: { status: 403, message: "Cartao nao pertence ao usuario" } };
   }

@@ -1,5 +1,6 @@
 import { amountStringToNumber, toAmountCents } from '../../utils/money';
 import { dayjs, nowBahia, normalizeDateOnly, parseDateFromText, TZ } from '../../utils/dates';
+import { PaymentMethod } from '../../utils/paymentMethod';
 
 export type QuickEntryIssue = 'missing_description' | 'ambiguous_category';
 export type QuickEntryConfidence = 'high' | 'medium' | 'low';
@@ -15,6 +16,9 @@ export interface ParsedQuickEntry {
   rawText: string;
   confidence: QuickEntryConfidence;
   issues: QuickEntryIssue[];
+  paymentMethod?: PaymentMethod;
+  cardNameGuess?: string;
+  cardId?: number | null;
 }
 
 export type AmountMatchStrategy = 'first' | 'last';

@@ -7,11 +7,13 @@ import {
   QuickEntryParseError,
   type CategoryResolver,
 } from '../../domain/quickEntry/parseQuickEntry';
+import { parsePayment } from '../../domain/quickEntryPayment';
 import { assertValidAmountCents, centsToNumber } from '../../utils/money';
 import { dayjs, TZ } from '../../utils/dates';
 import { normalizeCategoryName } from '../../utils/normalize';
 import { inferCategory } from '../../domain/categorizer';
 import { DEFAULT_PAYMENT_METHOD } from '../../utils/paymentMethod';
+import { CARD_SELECT, CardSummary, findCardByNameGuess } from '../../services/cardService';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -19,15 +21,6 @@ const router = Router();
 type CategoryMatch = {
   name: string;
   normalizedName: string;
-};
-
-const CARD_SELECT = { id: true, name: true, brand: true, color: true } as const;
-
-type CardSummary = {
-  id: number;
-  name: string;
-  brand: string;
-  color: string;
 };
 
 function buildPrefixCategoryResolver(categories: CategoryMatch[]): CategoryResolver {
@@ -85,33 +78,6 @@ function mapExpense(expense: {
   };
 }
 
-function normalizeTextForMatch(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function findCardMatch(rawText: string, cards: CardSummary[]) {
-  const normalizedText = normalizeTextForMatch(rawText);
-  if (!normalizedText) return null;
-
-  const haystack = ` ${normalizedText} `;
-  const candidates = cards
-    .map((card) => ({ card, normalizedName: normalizeTextForMatch(card.name) }))
-    .filter((item) => item.normalizedName)
-    .sort((a, b) => b.normalizedName.length - a.normalizedName.length);
-
-  for (const item of candidates) {
-    if (haystack.includes(` ${item.normalizedName} `)) {
-      return item.card;
-    }
-  }
-
-  return null;
-}
-
 router.post('/', async (req: AuthedRequest, res) => {
   const user = req.user;
   if (!user) {
@@ -143,10 +109,12 @@ router.post('/', async (req: AuthedRequest, res) => {
     return resolved;
   };
 
+  const paymentInfo = parsePayment(rawText);
+
   let parsed;
   try {
     // Use the last numeric value to align with quick entry input (ex: "gasolina 20 hoje 35").
-    parsed = parseQuickEntryText(rawText, {
+    parsed = parseQuickEntryText(paymentInfo.cleanedText, {
       amountMatchStrategy: 'last',
       categoryResolver,
       defaultCategoryName: 'Outros',
@@ -186,15 +154,20 @@ router.post('/', async (req: AuthedRequest, res) => {
   }
 
   const category = await getOrCreateCategory(user.id, categoryName || 'Outros');
-  const cards = await prisma.card.findMany({ where: { userId: user.id }, select: CARD_SELECT });
-  const matchedCard = cards.length ? findCardMatch(parsed.rawText, cards) : null;
+  parsed.paymentMethod = paymentInfo.paymentMethod ?? DEFAULT_PAYMENT_METHOD;
+  parsed.cardNameGuess = paymentInfo.cardNameGuess;
+  parsed.rawText = rawText;
+  const matchedCard =
+    parsed.paymentMethod === 'CREDIT'
+      ? await findCardByNameGuess(user.id, parsed.cardNameGuess)
+      : null;
 
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
       categoryId: category.id,
       amountCents,
-      paymentMethod: DEFAULT_PAYMENT_METHOD,
+      paymentMethod: parsed.paymentMethod,
       cardId: matchedCard?.id ?? null,
       description: parsed.description || 'Sem descricao',
       date: parsed.date,

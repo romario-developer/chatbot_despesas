@@ -2,6 +2,7 @@ import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { ParsedExpense } from './parseExpenseText';
 import { assertValidAmountCents } from '../utils/money';
+import { DEFAULT_PAYMENT_METHOD } from '../utils/paymentMethod';
 
 export async function createDraftFromParsed(userId: number, parsed: ParsedExpense) {
   await ensureDefaultCategory(userId);
@@ -16,6 +17,8 @@ export async function createDraftFromParsed(userId: number, parsed: ParsedExpens
       description: parsed.description || 'Sem descrição',
       date: parsed.date,
       rawText: parsed.rawText,
+      paymentMethod: parsed.paymentMethod ?? DEFAULT_PAYMENT_METHOD,
+      cardId: typeof parsed.cardId !== 'undefined' ? parsed.cardId : null,
     },
     include: { category: true },
   });
@@ -80,6 +83,8 @@ export async function confirmDraft(draftId: string, userId: number) {
       date: draft.date,
       source: 'telegram-text',
       rawText: draft.rawText,
+      paymentMethod: draft.paymentMethod ?? DEFAULT_PAYMENT_METHOD,
+      cardId: typeof draft.cardId !== 'undefined' ? draft.cardId : null,
     },
     include: { category: true },
   });

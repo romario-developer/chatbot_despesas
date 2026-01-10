@@ -21,6 +21,7 @@ import { generateResetToken } from '../services/resetService';
 import { prisma } from '../db/prisma';
 import { parseExpenseText } from '../services/parseExpenseText';
 import { createDraftFromParsed, confirmDraft } from '../services/draftService';
+import { findCardByNameGuess } from '../services/cardService';
 import { resolveLinkedUser } from './telegramUser';
 
 
@@ -599,6 +600,10 @@ export function registerCommandHandlers(bot: Bot) {
       }
 
       const parsed = parseExpenseText(input);
+      if (parsed.cardNameGuess && parsed.paymentMethod === 'CREDIT') {
+        const matchedCard = await findCardByNameGuess(linkedUser.id, parsed.cardNameGuess);
+        parsed.cardId = matchedCard?.id ?? null;
+      }
       const { draft } = await createDraftFromParsed(linkedUser.id, parsed);
       const confirmed = await confirmDraft(draft.id, linkedUser.id);
       if (!confirmed) {
