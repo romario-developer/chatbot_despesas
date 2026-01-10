@@ -39,6 +39,9 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
 
     const telegramId = sub === 'admin' ? API_TELEGRAM_ID : sub;
     const user = await getOrCreateUser(telegramId);
+    if (!user || !Number.isInteger(user.id) || user.id <= 0) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     req.auth = { sub };
     req.user = {

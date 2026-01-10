@@ -111,13 +111,13 @@ router.get('/summary', async (req: AuthedRequest, res) => {
 });
 
 router.get('/', async (req: AuthedRequest, res) => {
-  const userId = req.user?.id;
-  if (!userId) {
+  if (!req.user || !Number.isInteger(req.user.id)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  const userId = req.user.id;
 
-  console.log('[cards][get] user=%o', req.user);
-  console.log('[cards][get] userId=%s', userId);
+  console.log('[GET /api/cards] user:', req.user);
+  console.log('[GET /api/cards] userId:', req.user?.id);
 
   const cards = await prisma.card.findMany({
     where: { userId },
