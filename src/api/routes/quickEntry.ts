@@ -11,6 +11,7 @@ import { assertValidAmountCents, centsToNumber } from '../../utils/money';
 import { dayjs, TZ } from '../../utils/dates';
 import { normalizeCategoryName } from '../../utils/normalize';
 import { inferCategory } from '../../domain/categorizer';
+import { DEFAULT_PAYMENT_METHOD } from '../../utils/paymentMethod';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -18,6 +19,15 @@ const router = Router();
 type CategoryMatch = {
   name: string;
   normalizedName: string;
+};
+
+const CARD_SELECT = { id: true, name: true, brand: true, color: true } as const;
+
+type CardSummary = {
+  id: number;
+  name: string;
+  brand: string;
+  color: string;
 };
 
 function buildPrefixCategoryResolver(categories: CategoryMatch[]): CategoryResolver {
@@ -47,18 +57,24 @@ function buildPrefixCategoryResolver(categories: CategoryMatch[]): CategoryResol
 function mapExpense(expense: {
   id: number;
   amountCents: number;
+  paymentMethod: string;
+  cardId: number | null;
   description: string;
   date: Date;
   source: string;
   rawText: string;
   createdAt: Date;
   category: { name: string };
+  card?: CardSummary | null;
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, 'expense.amountCents', { allowZero: true });
   const date = dayjs(expense.date).tz(TZ);
   return {
     id: expense.id,
     amount: centsToNumber(amountCents),
+    paymentMethod: expense.paymentMethod,
+    cardId: expense.cardId ?? null,
+    card: expense.card ? { id: expense.card.id, name: expense.card.name, brand: expense.card.brand, color: expense.card.color } : null,
     description: expense.description,
     category: expense.category.name,
     date: date.format('YYYY-MM-DD'),
@@ -67,6 +83,33 @@ function mapExpense(expense: {
     rawText: expense.rawText,
     createdAt: expense.createdAt,
   };
+}
+
+function normalizeTextForMatch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findCardMatch(rawText: string, cards: CardSummary[]) {
+  const normalizedText = normalizeTextForMatch(rawText);
+  if (!normalizedText) return null;
+
+  const haystack = ` ${normalizedText} `;
+  const candidates = cards
+    .map((card) => ({ card, normalizedName: normalizeTextForMatch(card.name) }))
+    .filter((item) => item.normalizedName)
+    .sort((a, b) => b.normalizedName.length - a.normalizedName.length);
+
+  for (const item of candidates) {
+    if (haystack.includes(` ${item.normalizedName} `)) {
+      return item.card;
+    }
+  }
+
+  return null;
 }
 
 router.post('/', async (req: AuthedRequest, res) => {
@@ -143,18 +186,22 @@ router.post('/', async (req: AuthedRequest, res) => {
   }
 
   const category = await getOrCreateCategory(user.id, categoryName || 'Outros');
+  const cards = await prisma.card.findMany({ where: { userId: user.id }, select: CARD_SELECT });
+  const matchedCard = cards.length ? findCardMatch(parsed.rawText, cards) : null;
 
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
       categoryId: category.id,
       amountCents,
+      paymentMethod: DEFAULT_PAYMENT_METHOD,
+      cardId: matchedCard?.id ?? null,
       description: parsed.description || 'Sem descricao',
       date: parsed.date,
       source: 'pwa-quick',
       rawText: parsed.rawText,
     },
-    include: { category: true },
+    include: { category: true, card: { select: CARD_SELECT } },
   });
 
   console.info(`[quick-entry] userId=${user.id} amountCents=${amountCents}`);
