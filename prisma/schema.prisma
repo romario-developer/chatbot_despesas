@@ -32,6 +32,7 @@ model User {
   planning    Planning?
   linkCodes   TelegramLinkCode[]
   cards       Card[]
+  payments    CardPayment[]
 }
 
 model Category {
