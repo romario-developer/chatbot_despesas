@@ -6,7 +6,7 @@ import { getOrCreateCategory } from "../../services/categoryService";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { getMonthRangeFromMonthYear, getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
-import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
+import { assertValidAmountCents, centsToNumber, parseCurrencyInput } from "../../utils/money";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod, PaymentMethod } from "../../utils/paymentMethod";
 import {
   CARD_SELECT,
@@ -244,8 +244,12 @@ router.post("/", async (req: AuthedRequest, res) => {
     return res.status(cardCheck.error.status).json({ error: cardCheck.error.message });
   }
 
-  const amountCents = toAmountCents(amount);
-  if (!amountCents || amountCents <= 0) {
+  const rawAmountValue = typeof amount === "number" ? amount : parseCurrencyInput(amount);
+  if (rawAmountValue === null) {
+    return res.status(400).json({ error: "amount invalido" });
+  }
+  const amountCents = Math.round(rawAmountValue * 100);
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
     return res.status(400).json({ error: "amount deve ser maior que zero" });
   }
 
@@ -318,8 +322,12 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   const data: Prisma.ExpenseUncheckedUpdateManyInput = {};
 
   if (typeof amount !== "undefined") {
-    const amountCents = toAmountCents(amount);
-    if (!amountCents || amountCents <= 0) {
+    const amountValue = typeof amount === "number" ? amount : parseCurrencyInput(amount);
+    if (amountValue === null) {
+      return res.status(400).json({ error: "amount invalido" });
+    }
+    const amountCents = Math.round(amountValue * 100);
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
       return res.status(400).json({ error: "amount deve ser maior que zero" });
     }
     data.amountCents = amountCents;

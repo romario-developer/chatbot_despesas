@@ -174,10 +174,30 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         _sum: { amountCents: true },
         _count: { _all: true },
       });
-      const paymentTotals = await sumCardPayments(card.id, cycleEndStart.toDate());
+      const currentPayments = await sumCardPayments(card.id, cycleEndStart.toDate());
       const expenseCents = expenseTotals._sum.amountCents ?? 0;
-      const paymentCents = paymentTotals._sum.amountCents ?? 0;
+      const paymentCents = currentPayments._sum.amountCents ?? 0;
       const netCents = Math.max(0, expenseCents - paymentCents);
+
+      const nextCycleReference = cycleEndStart.add(1, 'day');
+      const nextCycleRange = getCardCycleRange(nextCycleReference.toDate(), card.closingDay);
+      const nextCycleStart = dayjs.tz(nextCycleRange.startDate, 'YYYY-MM-DD', TZ).startOf('day');
+      const nextCycleEnd = dayjs.tz(nextCycleRange.endDate, 'YYYY-MM-DD', TZ);
+      const nextCycleEndStart = nextCycleEnd.startOf('day');
+      const nextExpenseTotals = await prisma.expense.aggregate({
+        where: {
+          userId,
+          cardId: card.id,
+          paymentMethod: 'CREDIT',
+          date: { gte: nextCycleStart.toDate(), lte: nextCycleEnd.endOf('day').toDate() },
+        },
+        _sum: { amountCents: true },
+      });
+      const nextPayments = await sumCardPayments(card.id, nextCycleEndStart.toDate());
+      const nextExpenseCents = nextExpenseTotals._sum.amountCents ?? 0;
+      const nextPaymentCents = nextPayments._sum.amountCents ?? 0;
+      const nextNetCents = Math.max(0, nextExpenseCents - nextPaymentCents);
+
       return {
         cardId: card.id,
         name: card.name,
@@ -188,6 +208,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
         invoiceTotal: centsToNumber(netCents),
+        nextInvoiceTotal: centsToNumber(nextNetCents),
         entriesCount: expenseTotals._count._all ?? 0,
       };
     }),

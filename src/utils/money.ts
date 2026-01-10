@@ -27,17 +27,25 @@ export function amountStringToCents(raw: string): number | null {
   return Math.round(amount * 100);
 }
 
-export function toAmountCents(amount: unknown): number | null {
-  if (typeof amount === 'number') {
-    if (!Number.isFinite(amount)) return null;
-    return Math.round(amount * 100);
+export function parseCurrencyInput(value: unknown): number | null {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return Number(value.toFixed(2));
   }
 
-  if (typeof amount === 'string') {
-    return amountStringToCents(amount);
+  if (typeof value === "string") {
+    return amountStringToNumber(value);
   }
 
   return null;
+}
+
+export function toAmountCents(amount: unknown): number | null {
+  const parsed = parseCurrencyInput(amount);
+  if (parsed === null) return null;
+  return Math.round(parsed * 100);
 }
 
 export function assertValidAmountCents(
