@@ -130,4 +130,4 @@ curl -H "Authorization: Bearer $TOKEN" \
 ## Notas
 - Fuso horario: `America/Bahia` para parsing e formatacao.
 - Categorias sao por usuario (cada `telegram_id` tem suas categorias). A API cria/usa um usuario interno `api-admin` para lancamentos manuais.
-- No Render, o Start Command deve ser `npm run db:migrate && npm start` e o Build Command `npm install && prisma generate && npm run build` para garantir que `prisma migrate deploy` é executado antes do servidor subir e o Prisma Client está gerado.
+- Para o serviço backend no Render, o Build Command deve ser `npm install && npm run build` (o `start:prod` já roda `npm run db:generate`) e o Start Command `npm run start:prod`, garantindo que `prisma generate` + `prisma migrate deploy` sejam executados antes de subir `dist/src/index.js`.

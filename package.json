@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
+    "start:prod": "npm run db:generate && npm run db:migrate && node dist/src/index.js",
     "start:render": "node dist/src/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
