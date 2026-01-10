@@ -188,7 +188,7 @@ export function parsePayment(text: string): PaymentParseResult {
       if (cardRange) {
         const originalRange = mapNormalizedRangeToOriginal(positions, cardRange);
         if (originalRange) {
-          const guess = normalizedCardName(trimmed.slice(originalRange.start, originalRange.end));
+          const guess = normalizeCardName(trimmed.slice(originalRange.start, originalRange.end));
           if (guess) {
             cardNameGuess = guess;
           }
