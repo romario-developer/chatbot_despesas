@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { Prisma, type PaymentMethod } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { getPlanningByUserId } from '../../services/planningService';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
@@ -9,6 +10,32 @@ import { getCategoryColor } from '../../utils/colors';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
+
+const CASH_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'DEBIT', 'TRANSFER', 'OTHER'];
+
+async function sumCardPaymentsInRange(userId: number, start: Date, endExclusive: Date) {
+  try {
+    return await prisma.cardPayment.aggregate({
+      where: {
+        userId,
+        paymentDate: { gte: start, lt: endExclusive },
+      },
+      _sum: { amountCents: true },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.message.includes('CardPayment')
+    ) {
+      console.warn('[dashboard/summary] CardPayment table missing, skipping payments', {
+        userId,
+        error: err.message,
+      });
+      return { _sum: { amountCents: 0 } };
+    }
+    throw err;
+  }
+}
 
 function parseMonthParam(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -60,6 +87,34 @@ router.get('/summary', async (req: AuthedRequest, res) => {
       expenseTotalCents += amountCents;
     }
 
+    const cashExpenses = await prisma.expense.aggregate({
+      where: {
+        userId,
+        paymentMethod: { in: CASH_PAYMENT_METHODS },
+        date: { gte: start, lt: endExclusive },
+      },
+      _sum: { amountCents: true },
+    });
+    const creditExpenses = await prisma.expense.aggregate({
+      where: {
+        userId,
+        paymentMethod: 'CREDIT',
+        date: { gte: start, lt: endExclusive },
+      },
+      _sum: { amountCents: true },
+    });
+    const cardPaymentTotals = await sumCardPaymentsInRange(userId, start, endExclusive);
+
+    const cashExpenseCents = assertValidAmountCents(cashExpenses._sum.amountCents ?? 0, 'expense.cashTotal', {
+      allowZero: true,
+    });
+    const creditExpenseCents = assertValidAmountCents(creditExpenses._sum.amountCents ?? 0, 'expense.creditTotal', {
+      allowZero: true,
+    });
+    const cardPaymentsCents = assertValidAmountCents(cardPaymentTotals._sum.amountCents ?? 0, 'cardPayment.amountCents', {
+      allowZero: true,
+    });
+
     const categoryIds = Array.from(categoryTotals.keys());
     const categories = categoryIds.length
       ? await prisma.category.findMany({ where: { userId, id: { in: categoryIds } } })
@@ -84,13 +139,19 @@ router.get('/summary', async (req: AuthedRequest, res) => {
     const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
     const incomeTotal = salaryTotal + extrasTotal;
     const expenseTotal = centsToNumber(expenseTotalCents);
-    const balance = incomeTotal - expenseTotal;
+    const expenseCashTotal = centsToNumber(cashExpenseCents);
+    const expenseCreditTotal = centsToNumber(creditExpenseCents);
+    const cardPaymentsTotal = centsToNumber(cardPaymentsCents);
+    const balance = incomeTotal - expenseCashTotal - cardPaymentsTotal;
 
     return res.json({
       month,
       balance,
       incomeTotal,
       expenseTotal,
+      expenseCashTotal,
+      expenseCreditTotal,
+      cardPaymentsTotal,
       byCategory,
     });
   } catch (err) {
