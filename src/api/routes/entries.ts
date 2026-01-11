@@ -44,6 +44,9 @@ function mapExpense(expense: {
   createdAt: Date;
   category: { name: string };
   card?: CardSummary | null;
+  installmentGroupId?: string | null;
+  installmentIndex?: number | null;
+  installmentsTotal?: number | null;
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, "expense.amountCents", { allowZero: true });
   return {
@@ -58,6 +61,9 @@ function mapExpense(expense: {
     source: expense.source,
     rawText: expense.rawText,
     createdAt: expense.createdAt,
+    installmentGroupId: expense.installmentGroupId ?? null,
+    installmentIndex: expense.installmentIndex ?? null,
+    installmentsTotal: expense.installmentsTotal ?? 1,
   };
 }
 
@@ -71,6 +77,9 @@ const EXPENSE_SELECT = {
   source: true,
   rawText: true,
   createdAt: true,
+  installmentGroupId: true,
+  installmentIndex: true,
+  installmentsTotal: true,
   category: { select: { name: true } },
   card: { select: CARD_SELECT },
 } as const;
@@ -297,6 +306,19 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const existing = await prisma.expense.findFirst({
+    where: { id, userId: user.id },
+    select: { installmentGroupId: true },
+  });
+  if (!existing) {
+    return res.status(404).json({ error: "Lancamento nao encontrado" });
+  }
+  const isInstallmentEntry = Boolean(existing.installmentGroupId);
+  const attemptedInstallmentChange =
+    typeof req.body?.installmentsTotal !== "undefined" ||
+    typeof req.body?.installmentIndex !== "undefined" ||
+    typeof req.body?.installmentGroupId !== "undefined";
+
   const { amount, description, category, date } = req.body ?? {};
   const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
   if (typeof req.body?.paymentMethod !== "undefined" && !paymentMethod) {
@@ -317,6 +339,14 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     typeof req.body?.cardId === "undefined"
   ) {
     return res.status(400).json({ error: "Nenhum campo para atualizar" });
+  }
+
+  if (isInstallmentEntry && attemptedInstallmentChange) {
+    return res.status(400).json({ error: "Nao eh possivel alterar parcelas" });
+  }
+
+  if (isInstallmentEntry && typeof amount !== "undefined") {
+    return res.status(400).json({ error: "Nao eh possivel alterar valor de parcela" });
   }
 
   const data: Prisma.ExpenseUncheckedUpdateManyInput = {};
