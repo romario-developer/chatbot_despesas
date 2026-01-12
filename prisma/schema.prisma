@@ -33,6 +33,7 @@ model User {
   linkCodes   TelegramLinkCode[]
   cards       Card[]
   payments    CardPayment[]
+  installmentGroups InstallmentGroup[]
 }
 
 model Category {
