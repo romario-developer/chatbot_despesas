@@ -5,7 +5,6 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
-import { getMonthRangeFromMonthYear, getMonthRangeTZ } from "../../utils/dateRange";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod } from "../../utils/paymentMethod";
 import {
@@ -99,22 +98,6 @@ function buildDateRange(fromValue: string, toValue: string): DateRangeValidation
   return { fromDate, toDate };
 }
 
-function parseMonthParam(value: unknown): { year: number; month: number } | null {
-  if (Array.isArray(value)) {
-    return parseMonthParam(value[0]);
-  }
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  const match = normalized.match(/^(\d{4})-(\d{2})$/);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  const month = Number.parseInt(match[2], 10);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-    return null;
-  }
-  return { year, month };
-}
-
 async function resolveCardIdForUser(userId: number, value: unknown) {
   if (typeof value === "undefined") {
     return { cardId: undefined as number | null | undefined };
@@ -147,60 +130,42 @@ async function resolveUser(req: AuthedRequest) {
 }
 
 router.get("/", async (req: AuthedRequest, res) => {
+  let logFrom: string | undefined;
+  let logTo: string | undefined;
   try {
     const user = await resolveUser(req);
     if (!user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { from, to, category, q, source } = req.query;
-    const providedMonth = typeof req.query.month !== "undefined";
-    const parsedMonth = parseMonthParam(req.query.month);
-    if (providedMonth && !parsedMonth) {
-      return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+    const { category, q, source } = req.query;
+    const rawFrom = Array.isArray(req.query.from) ? req.query.from[0] : req.query.from;
+    const rawTo = Array.isArray(req.query.to) ? req.query.to[0] : req.query.to;
+    const trimmedFrom = typeof rawFrom === "string" ? rawFrom.trim() : "";
+    const trimmedTo = typeof rawTo === "string" ? rawTo.trim() : "";
+    const dateDetails = {
+      from: trimmedFrom || null,
+      to: trimmedTo || null,
+    };
+    logFrom = dateDetails.from ?? undefined;
+    logTo = dateDetails.to ?? undefined;
+
+    if (!trimmedFrom || !trimmedTo) {
+      return res.status(400).json({ error: "Invalid date range", details: dateDetails });
     }
 
-    const filters: Prisma.ExpenseWhereInput[] = [{ userId: user.id }];
+    const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
+    if ("detail" in validatedRange) {
+      return res.status(400).json({ error: "Invalid date range", details: dateDetails });
+    }
+
+    const filters: Prisma.ExpenseWhereInput[] = [
+      { userId: user.id },
+      { date: { gte: validatedRange.fromDate, lte: validatedRange.toDate } },
+    ];
 
     if (typeof source === "string" && source.trim()) {
       filters.push({ source: source.trim() });
-    }
-
-    const rangeLog = { from: "", to: "" };
-    if (parsedMonth) {
-      const { start, endExclusive } = getMonthRangeFromMonthYear(parsedMonth.month, parsedMonth.year, TZ);
-      filters.push({ date: { gte: start, lt: endExclusive } });
-      rangeLog.from = start.toISOString();
-      rangeLog.to = endExclusive.toISOString();
-    } else {
-      const rawFrom = Array.isArray(from) ? from[0] : from;
-      const rawTo = Array.isArray(to) ? to[0] : to;
-      const trimmedFrom = typeof rawFrom === "string" ? rawFrom.trim() : undefined;
-      const trimmedTo = typeof rawTo === "string" ? rawTo.trim() : undefined;
-      const hasDateRange = typeof trimmedFrom !== "undefined" || typeof trimmedTo !== "undefined";
-
-      if (hasDateRange) {
-        if (!trimmedFrom || !trimmedTo) {
-          return res.status(400).json({
-            error: "Invalid date range",
-            detail: '"from" e "to" sao obrigatorios juntos ao usar filtragem de datas',
-          });
-        }
-
-        const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
-        if ("detail" in validatedRange) {
-          return res.status(400).json({ error: "Invalid date range", detail: validatedRange.detail });
-        }
-
-        filters.push({ date: { gte: validatedRange.fromDate, lte: validatedRange.toDate } });
-        rangeLog.from = trimmedFrom;
-        rangeLog.to = trimmedTo;
-      } else {
-        const { start: monthStart, endExclusive: monthEndExclusive } = getMonthRangeTZ(new Date(), TZ);
-        filters.push({ date: { gte: monthStart, lt: monthEndExclusive } });
-        rangeLog.from = monthStart.toISOString();
-        rangeLog.to = monthEndExclusive.toISOString();
-      }
     }
 
     if (typeof req.query.cardId !== "undefined") {
@@ -240,14 +205,14 @@ router.get("/", async (req: AuthedRequest, res) => {
     });
 
     const items = expenses.map(mapExpense);
-    console.log("[entries] ok", { from: rangeLog.from, to: rangeLog.to, count: items.length });
+    console.log("[entries] ok", { from: trimmedFrom, to: trimmedTo, count: items.length });
     return res.json({ items });
   } catch (err) {
-    console.error("[entries] failed", {
-      endpoint: `${req.method} ${req.originalUrl}`,
-      query: req.query,
-      stack: err instanceof Error ? err.stack ?? err.message : String(err),
-    });
+    console.error(
+      "[entries] failed",
+      { from: logFrom ?? null, to: logTo ?? null },
+      err instanceof Error ? err.stack ?? err.message : String(err),
+    );
     return res.status(500).json({ error: "Internal Server Error", code: "ENTRIES_LIST_FAILED" });
   }
 });
