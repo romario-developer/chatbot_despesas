@@ -19,4 +19,4 @@ ALTER TABLE "Expense" ADD COLUMN "installmentGroupId" TEXT;
 
 CREATE INDEX "Expense_installmentGroupId_idx" ON "Expense"("installmentGroupId");
 
-ALTER TABLE "Expense" ADD CONSTRAINT "Expense_installmentGroupId_fkey" FOREIGN KEY ("installmentGroupId") REFERENCES "InstallmentGroup"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- ALTER TABLE "Expense" ADD CONSTRAINT "Expense_installmentGroupId_fkey" FOREIGN KEY ("installmentGroupId") REFERENCES "InstallmentGroup"("id") ON DELETE SET NULL ON UPDATE CASCADE;
