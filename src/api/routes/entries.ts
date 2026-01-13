@@ -5,7 +5,7 @@ import { prisma } from "../../db/prisma";
 import { getOrCreateCategory } from "../../services/categoryService";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
-import { getMonthRangeFromMonthYear, getMonthRangeTZ, parseFromToQuery } from "../../utils/dateRange";
+import { getMonthRangeFromMonthYear, getMonthRangeTZ } from "../../utils/dateRange";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod } from "../../utils/paymentMethod";
 import {
@@ -61,6 +61,44 @@ function mapExpense(expense: {
   };
 }
 
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDateBoundary(value: string, endOfDay: boolean): Date | null {
+  const normalized = value.trim();
+  if (!DATE_ONLY_REGEX.test(normalized)) {
+    return null;
+  }
+  const suffix = endOfDay ? "23:59:59.999Z" : "00:00:00.000Z";
+  const parsed = new Date(`${normalized}T${suffix}`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  const [year, month, day] = normalized.split("-").map((segment) => Number.parseInt(segment, 10));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() + 1 !== month || parsed.getUTCDate() !== day) {
+    return null;
+  }
+  return parsed;
+}
+
+type DateRangeValidationResult =
+  | { fromDate: Date; toDate: Date }
+  | { detail: string };
+
+function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
+  const fromDate = parseDateBoundary(fromValue, false);
+  if (!fromDate) {
+    return { detail: '"from" deve usar o formato YYYY-MM-DD' };
+  }
+  const toDate = parseDateBoundary(toValue, true);
+  if (!toDate) {
+    return { detail: '"to" deve usar o formato YYYY-MM-DD' };
+  }
+  if (fromDate.getTime() > toDate.getTime()) {
+    return { detail: '"from" precisa ser anterior ou igual a "to"' };
+  }
+  return { fromDate, toDate };
+}
+
 function parseMonthParam(value: unknown): { year: number; month: number } | null {
   if (Array.isArray(value)) {
     return parseMonthParam(value[0]);
@@ -109,85 +147,109 @@ async function resolveUser(req: AuthedRequest) {
 }
 
 router.get("/", async (req: AuthedRequest, res) => {
-  const user = await resolveUser(req);
-  if (!user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const { from, to, category, q } = req.query;
-  const providedMonth = typeof req.query.month !== "undefined";
-  const parsedMonth = parseMonthParam(req.query.month);
-  if (providedMonth && !parsedMonth) {
-    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
-  }
-
-  const filters: Prisma.ExpenseWhereInput[] = [];
-  filters.push({ userId: user.id });
-
-  if (typeof req.query.source === "string" && req.query.source.trim()) {
-    filters.push({ source: req.query.source.trim() });
-  }
-
-  if (parsedMonth) {
-    const { start, endExclusive } = getMonthRangeFromMonthYear(parsedMonth.month, parsedMonth.year, TZ);
-    filters.push({ date: { gte: start, lt: endExclusive } });
-  } else {
-    const { start, endExclusive, error } = parseFromToQuery(
-      typeof from === "string" ? from : undefined,
-      typeof to === "string" ? to : undefined,
-    );
-    if (error) {
-      return res.status(400).json({ error });
+  try {
+    const user = await resolveUser(req);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (start || endExclusive) {
-      filters.push({
-        date: { ...(start ? { gte: start } : {}), ...(endExclusive ? { lt: endExclusive } : {}) },
-      });
+    const { from, to, category, q, source } = req.query;
+    const providedMonth = typeof req.query.month !== "undefined";
+    const parsedMonth = parseMonthParam(req.query.month);
+    if (providedMonth && !parsedMonth) {
+      return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+    }
+
+    const filters: Prisma.ExpenseWhereInput[] = [{ userId: user.id }];
+
+    if (typeof source === "string" && source.trim()) {
+      filters.push({ source: source.trim() });
+    }
+
+    const rangeLog = { from: "", to: "" };
+    if (parsedMonth) {
+      const { start, endExclusive } = getMonthRangeFromMonthYear(parsedMonth.month, parsedMonth.year, TZ);
+      filters.push({ date: { gte: start, lt: endExclusive } });
+      rangeLog.from = start.toISOString();
+      rangeLog.to = endExclusive.toISOString();
     } else {
-      const { start: monthStart, endExclusive: monthEndExclusive } = getMonthRangeTZ(new Date(), TZ);
-      filters.push({ date: { gte: monthStart, lt: monthEndExclusive } });
+      const rawFrom = Array.isArray(from) ? from[0] : from;
+      const rawTo = Array.isArray(to) ? to[0] : to;
+      const trimmedFrom = typeof rawFrom === "string" ? rawFrom.trim() : undefined;
+      const trimmedTo = typeof rawTo === "string" ? rawTo.trim() : undefined;
+      const hasDateRange = typeof trimmedFrom !== "undefined" || typeof trimmedTo !== "undefined";
+
+      if (hasDateRange) {
+        if (!trimmedFrom || !trimmedTo) {
+          return res.status(400).json({
+            error: "Invalid date range",
+            detail: '"from" e "to" sao obrigatorios juntos ao usar filtragem de datas',
+          });
+        }
+
+        const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
+        if ("detail" in validatedRange) {
+          return res.status(400).json({ error: "Invalid date range", detail: validatedRange.detail });
+        }
+
+        filters.push({ date: { gte: validatedRange.fromDate, lte: validatedRange.toDate } });
+        rangeLog.from = trimmedFrom;
+        rangeLog.to = trimmedTo;
+      } else {
+        const { start: monthStart, endExclusive: monthEndExclusive } = getMonthRangeTZ(new Date(), TZ);
+        filters.push({ date: { gte: monthStart, lt: monthEndExclusive } });
+        rangeLog.from = monthStart.toISOString();
+        rangeLog.to = monthEndExclusive.toISOString();
+      }
     }
-  }
 
-  if (typeof req.query.cardId !== "undefined") {
-    const rawCardId = Array.isArray(req.query.cardId) ? req.query.cardId[0] : req.query.cardId;
-    const parsed =
-      typeof rawCardId === "number"
-        ? rawCardId
-        : typeof rawCardId === "string"
-          ? Number.parseInt(rawCardId, 10)
-          : NaN;
-    if (!Number.isInteger(parsed) || parsed <= 0) {
-      return res.status(400).json({ error: 'Parametro "cardId" invalido' });
+    if (typeof req.query.cardId !== "undefined") {
+      const rawCardId = Array.isArray(req.query.cardId) ? req.query.cardId[0] : req.query.cardId;
+      const parsed =
+        typeof rawCardId === "number"
+          ? rawCardId
+          : typeof rawCardId === "string"
+            ? Number.parseInt(rawCardId, 10)
+            : NaN;
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return res.status(400).json({ error: 'Parametro "cardId" invalido' });
+      }
+      filters.push({ cardId: parsed });
     }
-    filters.push({ cardId: parsed });
-  }
 
-  if (typeof category === "string" && category.trim()) {
-    filters.push({ category: { name: { contains: category.trim(), mode: "insensitive" } } });
-  }
+    if (typeof category === "string" && category.trim()) {
+      filters.push({ category: { name: { contains: category.trim(), mode: "insensitive" } } });
+    }
 
-  if (typeof q === "string" && q.trim()) {
-    filters.push({
-      OR: [
-        { description: { contains: q.trim(), mode: "insensitive" } },
-        { rawText: { contains: q.trim(), mode: "insensitive" } },
-        { category: { name: { contains: q.trim(), mode: "insensitive" } } },
-      ],
+    if (typeof q === "string" && q.trim()) {
+      filters.push({
+        OR: [
+          { description: { contains: q.trim(), mode: "insensitive" } },
+          { rawText: { contains: q.trim(), mode: "insensitive" } },
+          { category: { name: { contains: q.trim(), mode: "insensitive" } } },
+        ],
+      });
+    }
+
+    const where: Prisma.ExpenseWhereInput = filters.length ? { AND: filters } : {};
+
+    const expenses = await prisma.expense.findMany({
+      where,
+      include: { category: true, card: { select: CARD_SELECT } },
+      orderBy: { date: "desc" },
     });
+
+    const items = expenses.map(mapExpense);
+    console.log("[entries] ok", { from: rangeLog.from, to: rangeLog.to, count: items.length });
+    return res.json({ items });
+  } catch (err) {
+    console.error("[entries] failed", {
+      endpoint: `${req.method} ${req.originalUrl}`,
+      query: req.query,
+      stack: err instanceof Error ? err.stack ?? err.message : String(err),
+    });
+    return res.status(500).json({ error: "Internal Server Error", code: "ENTRIES_LIST_FAILED" });
   }
-
-  const where: Prisma.ExpenseWhereInput = filters.length ? { AND: filters } : {};
-
-  const expenses = await prisma.expense.findMany({
-    where,
-    include: { category: true, card: { select: CARD_SELECT } },
-    orderBy: { date: "desc" },
-  });
-
-  const items = expenses.map(mapExpense);
-  return res.json({ items });
 });
 
 router.get("/:id", async (req: AuthedRequest, res) => {
