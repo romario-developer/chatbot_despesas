@@ -4,6 +4,7 @@ import { authMiddleware } from './middleware/auth';
 import { noCacheMiddleware } from './middleware/noCache';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
+import assistantRoutes from './routes/assistant';
 import categoriesRoutes from './routes/categories';
 import cardsRoutes from './routes/cards';
 import debugRoutes from './routes/debug';
@@ -28,6 +29,7 @@ router.use('/admin', adminRoutes);
 router.use('/telegram', telegramRoutes);
 
 router.use(authMiddleware);
+router.use('/assistant', assistantRoutes);
 router.use(noCacheMiddleware);
 router.use('/entries', entriesRoutes);
 router.use('/dashboard', dashboardRoutes);
