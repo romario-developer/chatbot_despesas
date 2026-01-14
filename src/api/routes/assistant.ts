@@ -26,6 +26,37 @@ const requestSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
 });
 
+const ASSISTANT_FALLBACK_MESSAGE =
+  "Não consegui entender essa mensagem. Tente algo como: 'mercado 50' ou 'gastei 20 na farmácia'.";
+const MONTH_PATTERN = /^\d{4}-\d{2}$/;
+const CIRCUIT_BREAKER_WINDOW = 10 * 60 * 1000;
+
+let openAICircuitBreakUntil: number | null = null;
+
+function safeDateYYYYMMDD(input?: string | null) {
+  const now = dayjs.tz();
+  if (!input) {
+    return now.format('YYYY-MM-DD');
+  }
+  const candidate = dayjs(input, 'YYYY-MM-DD', true).tz(TZ);
+  if (candidate.isValid()) {
+    return candidate.format('YYYY-MM-DD');
+  }
+  return now.format('YYYY-MM-DD');
+}
+
+function safeMonth(month?: string) {
+  if (month && MONTH_PATTERN.test(month)) {
+    return month;
+  }
+  return dayjs.tz(TZ).format('YYYY-MM');
+}
+
+function monthStart(month?: string) {
+  const validMonth = safeMonth(month);
+  return dayjs(`${validMonth}-01`, 'YYYY-MM-DD', true).tz(TZ);
+}
+
 async function resolveCategoryId(userId: number, categoryName?: string) {
   if (categoryName) {
     const candidate = await prisma.category.findFirst({
@@ -66,10 +97,14 @@ router.post('/chat', async (req: AuthedRequest, res) => {
   await ensureDefaultCategory(user.id);
   try {
     const interpretation = await interpretAssistantMessageWithFallback(message, month);
-    return handleInterpretation(interpretation, user.id, conversationId, message, month, res);
+    await handleInterpretation(interpretation, user.id, conversationId, message, month, res);
   } catch (err) {
-    console.error('[assistant] parse error', err);
-    return res.status(502).json({ error: 'Erro ao interpretar a mensagem' });
+    console.error('[assistant] handler error', err);
+    return res.status(200).json({
+      conversationId,
+      assistantMessage: ASSISTANT_FALLBACK_MESSAGE,
+      actions: [],
+    });
   }
 });
 
@@ -77,10 +112,16 @@ async function interpretAssistantMessageWithFallback(message: string, month?: st
   if (!process.env.OPENAI_API_KEY) {
     return interpretAssistantMessageFallback(message, month);
   }
+  if (openAICircuitBreakUntil && Date.now() < openAICircuitBreakUntil) {
+    return interpretAssistantMessageFallback(message, month);
+  }
   try {
     return await interpretAssistantMessage(message, month);
-  } catch (err) {
+  } catch (err: any) {
     console.error('[assistant] OpenAI falhou, usando fallback local:', err);
+    if (err?.code === 'insufficient_quota') {
+      openAICircuitBreakUntil = Date.now() + CIRCUIT_BREAKER_WINDOW;
+    }
     return interpretAssistantMessageFallback(message, month);
   }
 }
@@ -101,8 +142,6 @@ async function handleInterpretation(
     suggestions: [],
   };
 
-  const now = dayjs.tz(TZ);
-
   const sendResponse = (override?: Partial<typeof responseBody>) => {
     res.status(200).json({ ...responseBody, ...override });
   };
@@ -113,11 +152,9 @@ async function handleInterpretation(
   }
 
   if (intent === 'query_summary') {
-    const targetMonth = month ?? now.format('YYYY-MM');
-    const parsedMonth = dayjs.tz(`${targetMonth}-01`, 'YYYY-MM-DD', TZ);
+    let parsedMonth = monthStart(month);
     if (!parsedMonth.isValid()) {
-      sendResponse({ assistantMessage: 'Mês inválido. Use YYYY-MM.' });
-      return;
+      parsedMonth = dayjs.tz();
     }
     const start = parsedMonth.startOf('month').toDate();
     const end = parsedMonth.endOf('month').toDate();
@@ -158,11 +195,13 @@ async function handleInterpretation(
       }
     }
     const categoryId = await resolveCategoryId(userId, data.categoryName ?? undefined);
-    const date = data.date ? dayjs.tz(data.date, 'YYYY-MM-DD', TZ) : now;
-    if (!date.isValid()) {
+    const hasUserDate = typeof data.date === 'string';
+    const strictDate = hasUserDate ? dayjs(data.date, 'YYYY-MM-DD', true).tz(TZ) : null;
+    if (hasUserDate && (!strictDate || !strictDate.isValid())) {
       sendResponse({ assistantMessage: 'Data inválida, use YYYY-MM-DD.' });
       return;
     }
+    const date = dayjs.tz(safeDateYYYYMMDD(data.date ?? null), 'YYYY-MM-DD', TZ);
     const payload = {
       userId,
       categoryId,
@@ -221,7 +260,7 @@ async function handleInterpretation(
       updates.rawText = rawMessage;
     }
     if (fields.date) {
-      const parsedDate = dayjs.tz(fields.date, 'YYYY-MM-DD', TZ);
+      const parsedDate = dayjs(fields.date, 'YYYY-MM-DD', true).tz(TZ);
       if (!parsedDate.isValid()) {
         sendResponse({ assistantMessage: 'Data inválida. Use YYYY-MM-DD.' });
         return;
