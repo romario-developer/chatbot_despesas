@@ -54,6 +54,14 @@ model Category {
   @@index([userId, createdAt])
 }
 
+model AssistantActionLog {
+  id             Int      @id @default(autoincrement())
+  conversationId String   @unique
+  lastEntity     String
+  lastEntityId   Int
+  updatedAt      DateTime @updatedAt
+}
+
 model Card {
   id         Int      @id @default(autoincrement())
   userId     Int
