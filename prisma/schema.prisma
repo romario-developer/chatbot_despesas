@@ -41,11 +41,14 @@ model Category {
   userId         Int
   name           String
   normalizedName String
+  isActive       Boolean        @default(true)
   createdAt      DateTime       @default(now())
 
   user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses Expense[]
   drafts   ExpenseDraft[]
+  rules    CategoryRule[]
+  memories CategoryMemory[]
 
   @@unique([userId, normalizedName])
   @@index([userId, createdAt])
@@ -73,6 +76,28 @@ model Card {
   @@index([userId, createdAt])
 }
 
+model CategoryRule {
+  id         Int      @id @default(autoincrement())
+  categoryId Int
+  keywords   String
+  priority   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+}
+
+model CategoryMemory {
+  id             Int      @id @default(autoincrement())
+  normalizedText String   @unique
+  categoryId     Int
+  updatedAt      DateTime @updatedAt
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
 model Expense {
   id            Int           @id @default(autoincrement())
   userId        Int
@@ -80,6 +105,7 @@ model Expense {
   cardId        Int?
   amountCents   Int
   paymentMethod PaymentMethod @default(OTHER)
+  categorySource String?
   description   String
   date          DateTime
   source        String
