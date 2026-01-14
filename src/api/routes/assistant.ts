@@ -3,7 +3,10 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { dayjs, TZ } from '../../utils/dates';
 import { AuthedRequest } from '../middleware/auth';
-import { interpretAssistantMessage, AssistantModelResponse } from '../../services/assistantChatService';
+import {
+  interpretAssistantMessage,
+  AssistantModelResponse,
+} from '../../services/assistantChatService';
 import { ensureDefaultCategory } from '../../services/categoryService';
 import { findCardByNameGuess } from '../../services/cardService';
 import { toAmountCents, centsToNumber } from '../../utils/money';
@@ -13,6 +16,7 @@ import {
   deleteAssistantActionLog,
 } from '../../services/assistantActionLogService';
 import { prisma } from '../../db/prisma';
+import { interpretAssistantMessageFallback } from '../../services/assistantFallbackService';
 
 const router = Router();
 
@@ -47,10 +51,6 @@ function buildActionResponse(actionType: string, entity: 'Expense' | 'Income', e
 }
 
 router.post('/chat', async (req: AuthedRequest, res) => {
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(501).json({ error: 'Assistente não configurada (faltando OPENAI_API_KEY)' });
-  }
-
   const validation = requestSchema.safeParse(req.body ?? {});
   if (!validation.success) {
     return res.status(400).json({ error: 'Corpo inválido', details: validation.error.format() });
@@ -65,13 +65,25 @@ router.post('/chat', async (req: AuthedRequest, res) => {
 
   await ensureDefaultCategory(user.id);
   try {
-    const interpretation = await interpretAssistantMessage(message, month);
+    const interpretation = await interpretAssistantMessageWithFallback(message, month);
     return handleInterpretation(interpretation, user.id, conversationId, message, month, res);
   } catch (err) {
     console.error('[assistant] parse error', err);
     return res.status(502).json({ error: 'Erro ao interpretar a mensagem' });
   }
 });
+
+async function interpretAssistantMessageWithFallback(message: string, month?: string) {
+  if (!process.env.OPENAI_API_KEY) {
+    return interpretAssistantMessageFallback(message, month);
+  }
+  try {
+    return await interpretAssistantMessage(message, month);
+  } catch (err) {
+    console.error('[assistant] OpenAI falhou, usando fallback local:', err);
+    return interpretAssistantMessageFallback(message, month);
+  }
+}
 
 async function handleInterpretation(
   interpretation: AssistantModelResponse,

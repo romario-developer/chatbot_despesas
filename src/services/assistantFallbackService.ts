@@ -1,0 +1,252 @@
+import type { AssistantModelResponse } from './assistantChatService';
+
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
+
+const undoKeywords = [
+  'desfaz',
+  'desfazer',
+  'cancelar ultimo',
+  'cancelar o último',
+  'cancelar o ultimo',
+  'apagar ultimo',
+  'apagar o último',
+  'apagar o ultimo',
+];
+
+const updatePrefixes = ['na verdade', 'corrige', 'corrija', 'ajusta', 'errei', 'foi', 'foi no', 'foi no cartão'];
+const queryKeywords = ['quanto gastei', 'total do mes', 'resumo', 'balanco', 'saldo do mes', 'gastos do mes'];
+const incomeKeywords = ['recebi', 'entrada', 'salario', 'pix recebido', 'ganhei'];
+
+const categoryHints: Array<{ name: string; keywords: string[] }> = [
+  {
+    name: 'Alimentação',
+    keywords: ['mercado', 'supermercado', 'padaria', 'almo', 'jantar', 'ifood', 'açougue', 'lanche'],
+  },
+  {
+    name: 'Transporte',
+    keywords: ['posto', 'gasolina', 'combustivel', 'uber', '99', 'onibus', 'busao'],
+  },
+  { name: 'Saúde', keywords: ['farmacia', 'remedio', 'consulta', 'exame'] },
+  { name: 'Casa', keywords: ['energia', 'luz', 'agua', 'agua', 'internet', 'aluguel', 'fixa'] },
+  { name: 'Serviços', keywords: ['assinatura', 'serviço', 'servico'] },
+];
+
+function normalizeMessage(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function containsAny(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function extractAmount(message: string) {
+  const match = message.match(/\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d+)?/);
+  if (!match) return { value: null, raw: null };
+  const raw = match[0];
+  let normalized = raw.replace(/[^\d.,]/g, '');
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
+  if (hasComma && hasDot) {
+    normalized = normalized.replace(/\./g, '');
+  }
+  normalized = normalized.replace(',', '.');
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) {
+    return { value: null, raw };
+  }
+  return { value, raw };
+}
+
+function extractCardName(message: string) {
+  const match = message.match(/cart[ãa]o\s+(?:de\s+|do\s+|da\s+|no\s+|na\s+)?([\w\s]+)/i);
+  if (!match) return null;
+  const candidate = match[1]
+    .split(/(?: no | na | de | do | da | com | e )/i)[0]
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .join(' ');
+  return candidate || null;
+}
+
+function detectPaymentMethod(normalized: string) {
+  if (normalized.includes('cartao') || normalized.includes('credito')) {
+    return 'CREDIT';
+  }
+  if (normalized.includes('dinheiro') || normalized.includes('pix') || normalized.includes('debito') || normalized.includes('caixa')) {
+    return 'CASH';
+  }
+  return null;
+}
+
+function detectCategoryName(message: string, normalized: string) {
+  for (const hint of categoryHints) {
+    if (hint.keywords.some((keyword) => normalized.includes(keyword))) {
+      return hint.name;
+    }
+  }
+  const explicitMatch = message.match(/categoria(?: de)?\s+([a-zçãáéíóú0-9\s]+)/i);
+  if (explicitMatch) {
+    return explicitMatch[1].trim();
+  }
+  const emMatch = message.match(/em\s+([a-zçãáéíóú0-9\s]+)/i);
+  if (emMatch) {
+    return emMatch[1].trim();
+  }
+  return null;
+}
+
+function buildDescription(message: string, amountFragment: string | null) {
+  let description = amountFragment ? message.replace(amountFragment, '') : message;
+  description = description
+    .replace(/(gastei|paguei|gastei no|gastei na|paguei no|paguei na|de)/gi, ' ')
+    .replace(/(com|no|na|de|do|da|em|por|no cartao|no cartão|no pix|na conta)/gi, ' ')
+    .trim()
+    .replace(/\s{2,}/g, ' ');
+  if (!description) {
+    return 'Despesa';
+  }
+  return description;
+}
+
+function buildAssistantMessageForExpense(amount: number, description: string) {
+  return `Ok, Romário — registrei ${currencyFormatter.format(amount)} em ${description}.`;
+}
+
+function buildAssistantMessageForIncome(amount: number, description: string) {
+  return `Receita registrada: ${currencyFormatter.format(amount)} — ${description}.`;
+}
+
+function buildAssistantMessageForUpdate(updates: Record<string, unknown>) {
+  const changed = Object.keys(updates)
+    .map((key) => `${key} atualizado`)
+    .join(', ');
+  if (!changed) return 'Tudo pronto, ajustei o último lançamento.';
+  return `Atualizei o último lançamento: ${changed}.`;
+}
+
+function buildNeedsClarification(reason: string): AssistantModelResponse {
+  return {
+    intent: 'needs_clarification',
+    data: {
+      amount: null,
+      description: null,
+      date: null,
+      paymentMethod: null,
+      cardName: null,
+      categoryName: null,
+      fieldsToUpdate: null,
+      summaryRange: null,
+    },
+    assistantMessage: reason,
+  };
+}
+
+export async function interpretAssistantMessageFallback(
+  message: string,
+  _month?: string,
+): Promise<AssistantModelResponse> {
+  const normalized = normalizeMessage(message);
+  const baseData = {
+    amount: null,
+    description: null,
+    date: null,
+    paymentMethod: null,
+    cardName: null,
+    categoryName: null,
+    fieldsToUpdate: null,
+    summaryRange: null,
+  };
+
+  if (containsAny(normalized, undoKeywords)) {
+    return {
+      intent: 'undo_last',
+      data: baseData,
+      assistantMessage: 'Claro, desfazendo o último lançamento agora.',
+    };
+  }
+
+  if (updatePrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    const amountData = extractAmount(message);
+    const fields: Record<string, number | string> = {};
+    if (amountData.value) fields.amount = amountData.value;
+    const paymentMethod = detectPaymentMethod(normalized);
+    if (paymentMethod) fields.paymentMethod = paymentMethod;
+    const cardName = extractCardName(message);
+    if (cardName) fields.cardName = cardName;
+    const categoryName = detectCategoryName(message, normalized);
+    if (categoryName) fields.categoryName = categoryName;
+    if (!Object.keys(fields).length) {
+      return buildNeedsClarification('O que você quer corrigir? Valor, categoria ou cartão?');
+    }
+    return {
+      intent: 'update_last',
+      data: {
+        ...baseData,
+        fieldsToUpdate: fields,
+      },
+      assistantMessage: buildAssistantMessageForUpdate(fields),
+    };
+  }
+
+  if (containsAny(normalized, queryKeywords)) {
+    return {
+      intent: 'query_summary',
+      data: {
+        ...baseData,
+        summaryRange: 'month',
+      },
+      assistantMessage: 'Deixa eu calcular o resumo do mês para você.',
+    };
+  }
+
+  const amountData = extractAmount(message);
+  const amount = amountData.value;
+
+  const isIncome = containsAny(normalized, incomeKeywords);
+  if (isIncome) {
+    if (!amount) {
+      return buildNeedsClarification('Quanto você recebeu?');
+    }
+    const description = buildDescription(message, amountData.raw);
+    return {
+      intent: 'create_income',
+      data: {
+        ...baseData,
+        amount,
+        description,
+        paymentMethod: 'CASH',
+      },
+      assistantMessage: buildAssistantMessageForIncome(amount, description),
+    };
+  }
+
+  if (!amount) {
+    return buildNeedsClarification('Qual valor você quer registrar?');
+  }
+
+  const description = buildDescription(message, amountData.raw);
+  const paymentMethod = detectPaymentMethod(normalized) ?? 'CASH';
+  const cardName = paymentMethod === 'CREDIT' ? extractCardName(message) : null;
+  const categoryName = detectCategoryName(message, normalized);
+
+  return {
+    intent: 'create_expense',
+    data: {
+      ...baseData,
+      amount,
+      description,
+      paymentMethod,
+      cardName,
+      categoryName,
+    },
+    assistantMessage: buildAssistantMessageForExpense(amount, description),
+  };
+}
