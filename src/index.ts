@@ -31,16 +31,13 @@ const PORT = Number(process.env.PORT) || 3000;
 const IS_RENDER = Boolean(process.env.RENDER);
 
 const app = express();
-const corsOriginCandidates = [
-  PWA_ORIGIN,
+const corsAllowedOrigins = new Set([
   "https://chatbot-despesas-pwa.onrender.com",
-  "https://despesas-pwa.onrender.com",
-  "https://despesas-pwa-a20e.onrender.com",
-];
-const allowedOrigins = new Set(corsOriginCandidates);
-if (IS_DEV) {
-  allowedOrigins.add("http://localhost:5173");
-  allowedOrigins.add("http://localhost:3000");
+  "http://localhost:5173",
+  "http://localhost:3000",
+]);
+if (PWA_ORIGIN) {
+  corsAllowedOrigins.add(PWA_ORIGIN);
 }
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
@@ -95,19 +92,16 @@ async function safeSetWebhookWithRetry(webhookUrl: string) {
 }
 
 const corsOptions = {
-  origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error("Not allowed by CORS"));
-  },
+  origin: Array.from(corsAllowedOrigins),
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Requested-With"],
   credentials: false,
   optionsSuccessStatus: 204,
 };
 const corsMiddleware = cors(corsOptions);
-app.options("/:path(*)", corsMiddleware);
+app.options(/.*/, corsMiddleware);
 app.use(corsMiddleware);
+console.log(`[CORS] Enabled for origins: ${Array.from(corsAllowedOrigins).join(", ")}`);
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
