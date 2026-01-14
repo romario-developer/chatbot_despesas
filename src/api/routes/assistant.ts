@@ -247,6 +247,8 @@ async function handleInterpretation(
     }
     const fields = data.fieldsToUpdate;
     const updates: Record<string, any> = {};
+    const shouldClearCard = fields.paymentDetail === 'PIX' && !fields.cardName;
+    const shouldClearCard = fields.paymentDetail === 'PIX' && !fields.cardName;
     if (fields.amount) {
       const cents = toAmountCents(fields.amount);
       if (!cents) {
@@ -280,6 +282,9 @@ async function handleInterpretation(
         return;
       }
       updates.cardId = cardId;
+    }
+    if (shouldClearCard) {
+      updates.cardId = null;
     }
     const updated = await prisma.expense.update({
       where: { id: log.lastEntityId },

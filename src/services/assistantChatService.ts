@@ -19,6 +19,7 @@ const fieldsToUpdateSchema = z
     description: z.string().min(1).optional(),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     paymentMethod: z.enum(['CASH', 'CREDIT']).optional(),
+    paymentDetail: z.string().min(1).optional(),
     cardName: z.string().min(1).optional(),
     categoryName: z.string().min(1).optional(),
   })
@@ -32,6 +33,7 @@ const assistantSchema = z.object({
     description: z.string().nullable(),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
     paymentMethod: z.enum(['CASH', 'CREDIT']).nullable(),
+    paymentDetail: z.string().min(1).nullable(),
     cardName: z.string().nullable(),
     categoryName: z.string().nullable(),
     fieldsToUpdate: fieldsToUpdateSchema,

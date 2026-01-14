@@ -20,6 +20,49 @@ const updatePrefixes = ['na verdade', 'corrige', 'corrija', 'ajusta', 'errei', '
 const queryKeywords = ['quanto gastei', 'total do mes', 'resumo', 'balanco', 'saldo do mes', 'gastos do mes'];
 const incomeKeywords = ['recebi', 'entrada', 'salario', 'pix recebido', 'ganhei'];
 
+const PIX_KEYWORD_REGEX = /\bpix\b/;
+
+const PAYMENT_DESCRIPTION_PATTERNS = [
+  'paguei via pix',
+  'paguei no pix',
+  'paguei via',
+  'paguei no',
+  'paguei na',
+  'paguei',
+  'gastei no',
+  'gastei na',
+  'gastei',
+  'pix',
+  'via pix',
+  'no pix',
+];
+
+const DESCRIPTION_CONNECTORS = [
+  'com',
+  'com o',
+  'com a',
+  'pelo',
+  'pela',
+  'pelos',
+  'pelas',
+  'nos',
+  'nas',
+  'no',
+  'na',
+  'de',
+  'do',
+  'da',
+  'em',
+  'por',
+  'via',
+  'no pix',
+  'na conta',
+  'no cartao',
+  'no cartao',
+  'no cartÃo',
+  'no cartÆo',
+];
+
 const categoryHints: Array<{ name: string; keywords: string[] }> = [
   {
     name: 'Alimentação',
@@ -44,6 +87,38 @@ function normalizeMessage(text: string) {
 
 function containsAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function removePatterns(text: string, patterns: string[]) {
+  return patterns.reduce((current, pattern) => {
+    const regex = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, 'gi');
+    return current.replace(regex, ' ');
+  }, text);
+}
+
+function containsPix(text: string) {
+  PIX_KEYWORD_REGEX.lastIndex = 0;
+  return PIX_KEYWORD_REGEX.test(text);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function removePatterns(text: string, patterns: string[]) {
+  return patterns.reduce((current, pattern) => {
+    const regex = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, 'gi');
+    return current.replace(regex, ' ');
+  }, text);
+}
+
+function containsPix(text: string) {
+  PIX_KEYWORD_REGEX.lastIndex = 0;
+  return PIX_KEYWORD_REGEX.test(text);
 }
 
 function extractAmount(message: string) {
@@ -80,7 +155,12 @@ function detectPaymentMethod(normalized: string) {
   if (normalized.includes('cartao') || normalized.includes('credito')) {
     return 'CREDIT';
   }
-  if (normalized.includes('dinheiro') || normalized.includes('pix') || normalized.includes('debito') || normalized.includes('caixa')) {
+  if (
+    normalized.includes('dinheiro') ||
+    containsPix(normalized) ||
+    normalized.includes('debito') ||
+    normalized.includes('caixa')
+  ) {
     return 'CASH';
   }
   return null;
@@ -140,6 +220,7 @@ function buildNeedsClarification(reason: string): AssistantModelResponse {
       description: null,
       date: null,
       paymentMethod: null,
+      paymentDetail: null,
       cardName: null,
       categoryName: null,
       fieldsToUpdate: null,
@@ -159,11 +240,16 @@ export async function interpretAssistantMessageFallback(
     description: null,
     date: null,
     paymentMethod: null,
+    paymentDetail: null,
     cardName: null,
     categoryName: null,
     fieldsToUpdate: null,
     summaryRange: null,
   };
+  const hasPixMention = containsPix(normalized);
+  const hasPixMention = containsPix(normalized);
+  const hasPixMention = containsPix(normalized);
+  const hasPixMention = containsPix(normalized);
 
   if (containsAny(normalized, undoKeywords)) {
     return {
@@ -178,7 +264,15 @@ export async function interpretAssistantMessageFallback(
     const fields: Record<string, number | string> = {};
     if (amountData.value) fields.amount = amountData.value;
     const paymentMethod = detectPaymentMethod(normalized);
-    if (paymentMethod) fields.paymentMethod = paymentMethod;
+    if (paymentMethod) {
+      fields.paymentMethod = paymentMethod;
+    }
+    if (hasPixMention && !fields.paymentMethod) {
+      fields.paymentMethod = 'CASH';
+    }
+    if (hasPixMention && fields.paymentMethod !== 'CREDIT') {
+      fields.paymentDetail = 'PIX';
+    }
     const cardName = extractCardName(message);
     if (cardName) fields.cardName = cardName;
     const categoryName = detectCategoryName(message, normalized);
@@ -223,8 +317,9 @@ export async function interpretAssistantMessageFallback(
         amount,
         description,
         paymentMethod: 'CASH',
+        paymentDetail: hasPixMention ? 'PIX' : null,
       },
-      assistantMessage: buildAssistantMessageForIncome(amount, description),
+      assistantMessage: buildAssistantMessageForIncome(amount, description, hasPixMention ? 'PIX' : undefined),
     };
   }
 
@@ -236,6 +331,8 @@ export async function interpretAssistantMessageFallback(
   const paymentMethod = detectPaymentMethod(normalized) ?? 'CASH';
   const cardName = paymentMethod === 'CREDIT' ? extractCardName(message) : null;
   const categoryName = detectCategoryName(message, normalized);
+  const pixDetail = hasPixMention && paymentMethod !== 'CREDIT' ? 'PIX' : null;
+  const pixDetail = hasPixMention && paymentMethod !== 'CREDIT' ? 'PIX' : null;
 
   return {
     intent: 'create_expense',
@@ -244,9 +341,10 @@ export async function interpretAssistantMessageFallback(
       amount,
       description,
       paymentMethod,
+      paymentDetail: pixDetail,
       cardName,
       categoryName,
     },
-    assistantMessage: buildAssistantMessageForExpense(amount, description),
+    assistantMessage: buildAssistantMessageForExpense(amount, description, pixDetail ?? undefined),
   };
 }
