@@ -34,10 +34,14 @@ const app = express();
 const corsOriginCandidates = [
   PWA_ORIGIN,
   "https://chatbot-despesas-pwa.onrender.com",
-  "http://localhost:5173",
-  "http://localhost:3000",
+  "https://despesas-pwa.onrender.com",
+  "https://despesas-pwa-a20e.onrender.com",
 ];
-const corsAllowedOrigins = Array.from(new Set(corsOriginCandidates));
+const allowedOrigins = new Set(corsOriginCandidates);
+if (IS_DEV) {
+  allowedOrigins.add("http://localhost:5173");
+  allowedOrigins.add("http://localhost:3000");
+}
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
 const WEBHOOK_BASE_DELAY_MS = 500;
@@ -91,7 +95,11 @@ async function safeSetWebhookWithRetry(webhookUrl: string) {
 }
 
 const corsOptions = {
-  origin: corsAllowedOrigins,
+  origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Requested-With"],
   credentials: false,
