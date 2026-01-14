@@ -33,11 +33,13 @@ const IS_RENDER = Boolean(process.env.RENDER);
 const app = express();
 const allowedOrigins = new Set([
   PWA_ORIGIN,
+  "https://chatbot-despesas-pwa.onrender.com",
   "https://despesas-pwa.onrender.com",
   "https://despesas-pwa-a20e.onrender.com",
 ]);
 if (IS_DEV) {
   allowedOrigins.add("http://localhost:5173");
+  allowedOrigins.add("http://localhost:3000");
 }
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
@@ -91,26 +93,20 @@ async function safeSetWebhookWithRetry(webhookUrl: string) {
   console.error(`[webhook] Nao foi possivel registrar apos ${MAX_WEBHOOK_ATTEMPTS} tentativas. Continuando sem webhook.`);
 }
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.has(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "Origin",
-      "X-Requested-With",
-      "Cache-Control",
-      "Pragma",
-    ],
-    optionsSuccessStatus: 204,
-  }),
-);
+const corsOptions = {
+  origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Requested-With"],
+  credentials: false,
+  optionsSuccessStatus: 204,
+};
+const corsMiddleware = cors(corsOptions);
+app.options("*", corsMiddleware);
+app.use(corsMiddleware);
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
