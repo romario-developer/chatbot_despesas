@@ -2,7 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 
 import { prisma } from "../../db/prisma";
-import { getOrCreateCategory } from "../../services/categoryService";
+import { ensureDefaultCategory, getOrCreateCategory } from "../../services/categoryService";
+import { classifyCategoryByText, learnCategoryMemory } from "../../services/categoryClassifier";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
@@ -43,6 +44,7 @@ function mapExpense(expense: {
   createdAt: Date;
   category: { name: string };
   card?: CardSummary | null;
+  categorySource?: string | null;
 }) {
   const amountCents = assertValidAmountCents(expense.amountCents, "expense.amountCents", { allowZero: true });
   return {
@@ -57,6 +59,7 @@ function mapExpense(expense: {
     source: expense.source,
     rawText: expense.rawText,
     createdAt: expense.createdAt,
+    categorySource: expense.categorySource ?? "MANUAL",
   };
 }
 
@@ -262,32 +265,44 @@ router.post("/", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "amount deve ser maior que zero" });
   }
 
-  if (typeof description !== "string" || !description.trim()) {
-    return res.status(400).json({ error: "description e obrigatoria" });
-  }
-
-  if (typeof category !== "string" || !category.trim()) {
-    return res.status(400).json({ error: "category e obrigatoria" });
-  }
-
   const parsedDate = parseDateOnly(date);
   if (!parsedDate) {
     return res.status(400).json({ error: "date invalida. Use YYYY-MM-DD" });
   }
+  const descriptionText = description.trim();
 
-  const categoryRow = await getOrCreateCategory(user.id, category);
+  let categoryId: number;
+  let categorySource: "MANUAL" | "MEMORY" | "RULE" | "NONE" = "NONE";
+
+  if (typeof category === "string" && category.trim()) {
+    const categoryRow = await getOrCreateCategory(user.id, category);
+    categoryId = categoryRow.id;
+    categorySource = "MANUAL";
+    await learnCategoryMemory(user.id, descriptionText, categoryRow.id);
+  } else {
+    const classification = await classifyCategoryByText(user.id, descriptionText);
+    if (classification) {
+      categoryId = classification.categoryId;
+      categorySource = classification.source;
+    } else {
+      const fallback = await ensureDefaultCategory(user.id);
+      categoryId = fallback.id;
+      categorySource = "NONE";
+    }
+  }
 
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
-      categoryId: categoryRow.id,
+      categoryId,
       amountCents,
       paymentMethod: paymentMethod ?? DEFAULT_PAYMENT_METHOD,
       ...(typeof cardCheck.cardId !== "undefined" ? { cardId: cardCheck.cardId } : {}),
-      description: description.trim(),
+      description: descriptionText,
       date: parsedDate,
-      rawText: description.trim(),
+      rawText: descriptionText,
       source: "manual",
+      categorySource,
     },
     include: { category: true, card: { select: CARD_SELECT } },
   });
@@ -304,6 +319,14 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const existingExpense = await prisma.expense.findFirst({
+    where: { id, userId: user.id },
+    select: { description: true },
+  });
+  if (!existingExpense) {
+    return res.status(404).json({ error: "Lancamento nao encontrado" });
   }
 
   const { amount, description, category, date } = req.body ?? {};
@@ -329,6 +352,8 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   }
 
   const data: Prisma.ExpenseUncheckedUpdateManyInput = {};
+  let manualCategoryId: number | null = null;
+  let manualDescriptionText: string | null = null;
 
   if (typeof amount !== "undefined") {
     const amountCents = toAmountCents(amount);
@@ -364,6 +389,10 @@ router.put("/:id", async (req: AuthedRequest, res) => {
     }
     const categoryRow = await getOrCreateCategory(user.id, category);
     data.categoryId = categoryRow.id;
+    data.categorySource = "MANUAL";
+    manualCategoryId = categoryRow.id;
+    manualDescriptionText =
+      typeof description === "string" && description.trim() ? description.trim() : existingExpense.description;
   }
 
   if (typeof cardCheck.cardId !== "undefined") {
@@ -377,6 +406,10 @@ router.put("/:id", async (req: AuthedRequest, res) => {
 
   if (!updated.count) {
     return res.status(404).json({ error: "Lancamento nao encontrado" });
+  }
+
+  if (manualCategoryId && manualDescriptionText) {
+    await learnCategoryMemory(user.id, manualDescriptionText, manualCategoryId);
   }
 
   const saved = await prisma.expense.findFirst({
