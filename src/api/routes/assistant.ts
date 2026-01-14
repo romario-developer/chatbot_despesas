@@ -63,6 +63,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  await ensureDefaultCategory(user.id);
   try {
     const interpretation = await interpretAssistantMessage(message, month);
     return handleInterpretation(interpretation, user.id, conversationId, message, month, res);
