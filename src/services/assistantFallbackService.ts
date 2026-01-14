@@ -58,15 +58,29 @@ const DESCRIPTION_CONNECTORS = [
   'no pix',
   'na conta',
   'no cartao',
-  'no cartao',
-  'no cartÃo',
-  'no cartÆo',
+  'no cartão',
 ];
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function removePatterns(text: string, patterns: string[]) {
+  return patterns.reduce((current, pattern) => {
+    const regex = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, 'gi');
+    return current.replace(regex, ' ');
+  }, text);
+}
+
+function containsPix(text: string) {
+  PIX_KEYWORD_REGEX.lastIndex = 0;
+  return PIX_KEYWORD_REGEX.test(text);
+}
 
 const categoryHints: Array<{ name: string; keywords: string[] }> = [
   {
     name: 'Alimentação',
-    keywords: ['mercado', 'supermercado', 'padaria', 'almo', 'jantar', 'ifood', 'açougue', 'lanche'],
+    keywords: ['mercado', 'supermercado', 'padaria', 'almoço', 'jantar', 'ifood', 'açougue', 'lanche'],
   },
   {
     name: 'Transporte',
@@ -87,38 +101,6 @@ function normalizeMessage(text: string) {
 
 function containsAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function removePatterns(text: string, patterns: string[]) {
-  return patterns.reduce((current, pattern) => {
-    const regex = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, 'gi');
-    return current.replace(regex, ' ');
-  }, text);
-}
-
-function containsPix(text: string) {
-  PIX_KEYWORD_REGEX.lastIndex = 0;
-  return PIX_KEYWORD_REGEX.test(text);
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function removePatterns(text: string, patterns: string[]) {
-  return patterns.reduce((current, pattern) => {
-    const regex = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, 'gi');
-    return current.replace(regex, ' ');
-  }, text);
-}
-
-function containsPix(text: string) {
-  PIX_KEYWORD_REGEX.lastIndex = 0;
-  return PIX_KEYWORD_REGEX.test(text);
 }
 
 function extractAmount(message: string) {
@@ -185,23 +167,23 @@ function detectCategoryName(message: string, normalized: string) {
 
 function buildDescription(message: string, amountFragment: string | null) {
   let description = amountFragment ? message.replace(amountFragment, '') : message;
-  description = description
-    .replace(/(gastei|paguei|gastei no|gastei na|paguei no|paguei na|de)/gi, ' ')
-    .replace(/(com|no|na|de|do|da|em|por|no cartao|no cartão|no pix|na conta)/gi, ' ')
-    .trim()
-    .replace(/\s{2,}/g, ' ');
+  description = removePatterns(description, PAYMENT_DESCRIPTION_PATTERNS);
+  description = removePatterns(description, DESCRIPTION_CONNECTORS);
+  description = description.trim().replace(/\s{2,}/g, ' ');
   if (!description) {
     return 'Despesa';
   }
   return description;
 }
 
-function buildAssistantMessageForExpense(amount: number, description: string) {
-  return `Ok, Romário — registrei ${currencyFormatter.format(amount)} em ${description}.`;
+function buildAssistantMessageForExpense(amount: number, description: string, detail?: string) {
+  const detailSuffix = detail ? ` (${detail})` : '';
+  return `Ok, Romário — registrei ${currencyFormatter.format(amount)} em ${description}${detailSuffix}.`;
 }
 
-function buildAssistantMessageForIncome(amount: number, description: string) {
-  return `Receita registrada: ${currencyFormatter.format(amount)} — ${description}.`;
+function buildAssistantMessageForIncome(amount: number, description: string, detail?: string) {
+  const detailSuffix = detail ? ` (${detail})` : '';
+  return `Receita registrada: ${currencyFormatter.format(amount)} — ${description}${detailSuffix}.`;
 }
 
 function buildAssistantMessageForUpdate(updates: Record<string, unknown>) {
@@ -246,9 +228,6 @@ export async function interpretAssistantMessageFallback(
     fieldsToUpdate: null,
     summaryRange: null,
   };
-  const hasPixMention = containsPix(normalized);
-  const hasPixMention = containsPix(normalized);
-  const hasPixMention = containsPix(normalized);
   const hasPixMention = containsPix(normalized);
 
   if (containsAny(normalized, undoKeywords)) {
@@ -331,7 +310,6 @@ export async function interpretAssistantMessageFallback(
   const paymentMethod = detectPaymentMethod(normalized) ?? 'CASH';
   const cardName = paymentMethod === 'CREDIT' ? extractCardName(message) : null;
   const categoryName = detectCategoryName(message, normalized);
-  const pixDetail = hasPixMention && paymentMethod !== 'CREDIT' ? 'PIX' : null;
   const pixDetail = hasPixMention && paymentMethod !== 'CREDIT' ? 'PIX' : null;
 
   return {
