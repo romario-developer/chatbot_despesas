@@ -195,20 +195,29 @@ function buildAssistantMessageForUpdate(updates: Record<string, unknown>) {
   return `Atualizei o último lançamento: ${changed}.`;
 }
 
+function createEmptyAssistantData(): AssistantModelResponse['data'] {
+  return {
+    amount: null,
+    description: null,
+    date: null,
+    paymentMethod: null,
+    paymentDetail: null,
+    installmentCurrent: null,
+    installmentTotal: null,
+    installmentGroupId: null,
+    purchaseLabel: null,
+    postedMonth: null,
+    cardName: null,
+    categoryName: null,
+    fieldsToUpdate: null,
+    summaryRange: null,
+  };
+}
+
 function buildNeedsClarification(reason: string): AssistantModelResponse {
   return {
     intent: 'needs_clarification',
-    data: {
-      amount: null,
-      description: null,
-      date: null,
-      paymentMethod: null,
-      paymentDetail: null,
-      cardName: null,
-      categoryName: null,
-      fieldsToUpdate: null,
-      summaryRange: null,
-    },
+    data: createEmptyAssistantData(),
     assistantMessage: reason,
   };
 }
@@ -221,20 +230,10 @@ export async function interpretAssistantMessageFallback(
   const workingMessage = parcelInfo.cleanedText;
   const normalized = normalizeMessage(workingMessage);
   const baseData = {
-    amount: null,
-    description: null,
-    date: null,
-    paymentMethod: null,
-    paymentDetail: null,
+    ...createEmptyAssistantData(),
     installmentCurrent: parcelInfo.current,
     installmentTotal: parcelInfo.total,
-    installmentGroupId: null,
     purchaseLabel: parcelInfo.purchaseLabel,
-    postedMonth: null,
-    cardName: null,
-    categoryName: null,
-    fieldsToUpdate: null,
-    summaryRange: null,
   };
   const hasPixMention = containsPix(normalized);
 
