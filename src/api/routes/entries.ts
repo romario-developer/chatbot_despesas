@@ -66,39 +66,41 @@ function mapExpense(expense: {
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
-function parseDateBoundary(value: string, endOfDay: boolean): Date | null {
-  const normalized = value.trim();
-  if (!DATE_ONLY_REGEX.test(normalized)) {
-    return null;
-  }
-  const suffix = endOfDay ? "23:59:59.999Z" : "00:00:00.000Z";
-  const parsed = new Date(`${normalized}T${suffix}`);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  const [year, month, day] = normalized.split("-").map((segment) => Number.parseInt(segment, 10));
-  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() + 1 !== month || parsed.getUTCDate() !== day) {
-    return null;
-  }
-  return parsed;
-}
-
 type DateRangeValidationResult =
   | { fromDate: Date; toDate: Date }
   | { detail: string };
 
 function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
-  const fromDate = parseDateBoundary(fromValue, false);
-  if (!fromDate) {
+  const fromStr = typeof fromValue === "string" ? fromValue.trim() : "";
+  const toStr = typeof toValue === "string" ? toValue.trim() : "";
+
+  // Validate format with regex
+  if (!DATE_ONLY_REGEX.test(fromStr)) {
     return { detail: '"from" deve usar o formato YYYY-MM-DD' };
   }
-  const toDate = parseDateBoundary(toValue, true);
-  if (!toDate) {
+  if (!DATE_ONLY_REGEX.test(toStr)) {
     return { detail: '"to" deve usar o formato YYYY-MM-DD' };
   }
+
+  // Parse strictly with timezone
+  const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ);
+  const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ);
+
+  if (!from.isValid()) {
+    return { detail: '"from" data inválida' };
+  }
+  if (!to.isValid()) {
+    return { detail: '"to" data inválida' };
+  }
+
+  // Build date range with start and end of day
+  const fromDate = from.startOf("day").toDate();
+  const toDate = to.endOf("day").toDate();
+
   if (fromDate.getTime() > toDate.getTime()) {
     return { detail: '"from" precisa ser anterior ou igual a "to"' };
   }
+
   return { fromDate, toDate };
 }
 
@@ -147,25 +149,38 @@ router.get("/", async (req: AuthedRequest, res) => {
     const rawTo = Array.isArray(req.query.to) ? req.query.to[0] : req.query.to;
     const trimmedFrom = typeof rawFrom === "string" ? rawFrom.trim() : "";
     const trimmedTo = typeof rawTo === "string" ? rawTo.trim() : "";
-    const dateDetails = {
-      from: trimmedFrom || null,
-      to: trimmedTo || null,
-    };
-    logFrom = dateDetails.from ?? undefined;
-    logTo = dateDetails.to ?? undefined;
+    
+    logFrom = trimmedFrom || undefined;
+    logTo = trimmedTo || undefined;
 
+    // Validate and parse date range
     if (!trimmedFrom || !trimmedTo) {
-      return res.status(400).json({ error: "Invalid date range", details: dateDetails });
+      return res.status(400).json({ 
+        error: "Invalid date range",
+        details: { from: trimmedFrom || null, to: trimmedTo || null }
+      });
     }
 
     const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
     if ("detail" in validatedRange) {
-      return res.status(400).json({ error: "Invalid date range", details: dateDetails });
+      console.log("[entries] invalid date range", { from: trimmedFrom, to: trimmedTo, detail: validatedRange.detail });
+      return res.status(400).json({ 
+        error: "Invalid date range",
+        details: validatedRange.detail
+      });
     }
+
+    const { fromDate, toDate } = validatedRange;
+    console.log("[entries] date range parsed", { 
+      from: trimmedFrom, 
+      to: trimmedTo, 
+      fromDate: fromDate.toISOString(), 
+      toDate: toDate.toISOString() 
+    });
 
     const filters: Prisma.ExpenseWhereInput[] = [
       { userId: user.id },
-      { date: { gte: validatedRange.fromDate, lte: validatedRange.toDate } },
+      { date: { gte: fromDate, lte: toDate } },
     ];
 
     if (typeof source === "string" && source.trim()) {
@@ -205,7 +220,7 @@ router.get("/", async (req: AuthedRequest, res) => {
     const expenses = await prisma.expense.findMany({
       where,
       include: { category: true, card: { select: CARD_SELECT } },
-      orderBy: { date: "desc" },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     });
 
     const items = expenses.map(mapExpense);
@@ -217,7 +232,7 @@ router.get("/", async (req: AuthedRequest, res) => {
       { from: logFrom ?? null, to: logTo ?? null },
       err instanceof Error ? err.stack ?? err.message : String(err),
     );
-    return res.status(500).json({ error: "Internal Server Error", code: "ENTRIES_LIST_FAILED" });
+    return res.status(500).json({ error: "Failed to fetch entries", code: "ENTRIES_LIST_FAILED" });
   }
 });
 
