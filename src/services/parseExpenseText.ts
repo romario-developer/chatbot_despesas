@@ -5,6 +5,7 @@ import {
 } from '../domain/quickEntry/parseQuickEntry';
 import { parseInstallments } from '../domain/quickEntryInstallments';
 import { parsePayment } from '../domain/quickEntryPayment';
+import { parseInstallmentPattern } from '../domain/installmentPattern';
 import { DEFAULT_PAYMENT_METHOD } from '../utils/paymentMethod';
 
 export type ParsedExpense = ParsedQuickEntry;
@@ -42,7 +43,8 @@ export function parseExpenseText(text: string): ParsedExpense {
     return { categoryName, cleanedText };
   };
 
-  const installmentInfo = parseInstallments(text);
+  const parcelInfo = parseInstallmentPattern(text);
+  const installmentInfo = parseInstallments(parcelInfo.cleanedText);
   const paymentInfo = parsePayment(installmentInfo.cleanedText);
   const parsed = parseQuickEntryText(paymentInfo.cleanedText, {
     amountMatchStrategy: 'first',
@@ -59,5 +61,8 @@ export function parseExpenseText(text: string): ParsedExpense {
   parsed.cardNameGuess = paymentInfo.cardNameGuess;
   parsed.rawText = text;
   parsed.installmentsTotal = installmentInfo.installmentsTotal ?? 1;
+  parsed.installmentCurrent = parcelInfo.current ?? undefined;
+  parsed.installmentTotal = parcelInfo.total ?? undefined;
+  parsed.purchaseLabel = parcelInfo.purchaseLabel ?? parsed.description;
   return parsed;
 }

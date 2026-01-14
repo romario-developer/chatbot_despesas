@@ -1,4 +1,5 @@
 import type { AssistantModelResponse } from './assistantChatService';
+import { parseInstallmentPattern } from '../domain/installmentPattern';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -216,13 +217,20 @@ export async function interpretAssistantMessageFallback(
   message: string,
   _month?: string,
 ): Promise<AssistantModelResponse> {
-  const normalized = normalizeMessage(message);
+  const parcelInfo = parseInstallmentPattern(message);
+  const workingMessage = parcelInfo.cleanedText;
+  const normalized = normalizeMessage(workingMessage);
   const baseData = {
     amount: null,
     description: null,
     date: null,
     paymentMethod: null,
     paymentDetail: null,
+    installmentCurrent: parcelInfo.current,
+    installmentTotal: parcelInfo.total,
+    installmentGroupId: null,
+    purchaseLabel: parcelInfo.purchaseLabel,
+    postedMonth: null,
     cardName: null,
     categoryName: null,
     fieldsToUpdate: null,
@@ -252,9 +260,9 @@ export async function interpretAssistantMessageFallback(
     if (hasPixMention && fields.paymentMethod !== 'CREDIT') {
       fields.paymentDetail = 'PIX';
     }
-    const cardName = extractCardName(message);
+    const cardName = extractCardName(workingMessage);
     if (cardName) fields.cardName = cardName;
-    const categoryName = detectCategoryName(message, normalized);
+    const categoryName = detectCategoryName(workingMessage, normalized);
     if (categoryName) fields.categoryName = categoryName;
     if (!Object.keys(fields).length) {
       return buildNeedsClarification('O que você quer corrigir? Valor, categoria ou cartão?');
@@ -280,7 +288,7 @@ export async function interpretAssistantMessageFallback(
     };
   }
 
-  const amountData = extractAmount(message);
+  const amountData = extractAmount(workingMessage);
   const amount = amountData.value;
 
   const isIncome = containsAny(normalized, incomeKeywords);
@@ -297,6 +305,10 @@ export async function interpretAssistantMessageFallback(
         description,
         paymentMethod: 'CASH',
         paymentDetail: hasPixMention ? 'PIX' : null,
+        installmentCurrent: baseData.installmentCurrent,
+        installmentTotal: baseData.installmentTotal,
+        purchaseLabel: baseData.purchaseLabel ?? description,
+        postedMonth: baseData.postedMonth,
       },
       assistantMessage: buildAssistantMessageForIncome(amount, description, hasPixMention ? 'PIX' : undefined),
     };
@@ -306,10 +318,10 @@ export async function interpretAssistantMessageFallback(
     return buildNeedsClarification('Qual valor você quer registrar?');
   }
 
-  const description = buildDescription(message, amountData.raw);
+  const description = buildDescription(workingMessage, amountData.raw);
   const paymentMethod = detectPaymentMethod(normalized) ?? 'CASH';
   const cardName = paymentMethod === 'CREDIT' ? extractCardName(message) : null;
-  const categoryName = detectCategoryName(message, normalized);
+  const categoryName = detectCategoryName(workingMessage, normalized);
   const pixDetail = hasPixMention && paymentMethod !== 'CREDIT' ? 'PIX' : null;
 
   return {
@@ -320,6 +332,9 @@ export async function interpretAssistantMessageFallback(
       description,
       paymentMethod,
       paymentDetail: pixDetail,
+      installmentCurrent: baseData.installmentCurrent,
+      installmentTotal: baseData.installmentTotal,
+      purchaseLabel: baseData.purchaseLabel ?? description,
       cardName,
       categoryName,
     },

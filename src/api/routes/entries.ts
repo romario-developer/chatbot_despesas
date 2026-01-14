@@ -13,6 +13,7 @@ import {
   CardSummary,
   findCardByIdForUser,
 } from "../../services/cardService";
+import { parseInstallmentPattern } from "../../domain/installmentPattern";
 
 const router = Router();
 
@@ -291,6 +292,7 @@ router.post("/", async (req: AuthedRequest, res) => {
     }
   }
 
+  const parcelInfo = parseInstallmentPattern(descriptionText);
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
@@ -303,6 +305,10 @@ router.post("/", async (req: AuthedRequest, res) => {
       rawText: descriptionText,
       source: "manual",
       categorySource,
+      purchaseLabel: parcelInfo.purchaseLabel ?? descriptionText,
+      postedMonth: dayjs(parsedDate).tz(TZ).format("YYYY-MM"),
+      installmentCurrent: parcelInfo.current ?? null,
+      installmentTotal: parcelInfo.total ?? null,
     },
     include: { category: true, card: { select: CARD_SELECT } },
   });

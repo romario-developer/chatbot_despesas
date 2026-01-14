@@ -118,6 +118,10 @@ model Expense {
   date          DateTime
   source        String
   rawText       String
+  installmentCurrent Int?
+  installmentTotal   Int?
+  purchaseLabel      String?
+  postedMonth        String?
   createdAt     DateTime      @default(now())
   installmentGroupId String?
   installmentIndex   Int  @default(1)
@@ -131,6 +135,7 @@ model Expense {
   @@index([userId, createdAt])
   @@index([userId, date])
   @@index([cardId])
+  @@index([cardId, date])
   @@index([userId, cardId, date])
   @@index([date])
   @@index([installmentGroupId])

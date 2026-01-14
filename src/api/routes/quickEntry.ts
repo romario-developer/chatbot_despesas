@@ -8,6 +8,7 @@ import {
   type CategoryResolver,
 } from '../../domain/quickEntry/parseQuickEntry';
 import { parseInstallments } from '../../domain/quickEntryInstallments';
+import { parseInstallmentPattern } from '../../domain/installmentPattern';
 import { parsePayment } from '../../domain/quickEntryPayment';
 import { assertValidAmountCents, centsToNumber } from '../../utils/money';
 import { dayjs, TZ } from '../../utils/dates';
@@ -122,7 +123,8 @@ router.post('/', async (req: AuthedRequest, res) => {
     return resolved;
   };
 
-  const installmentInfo = parseInstallments(rawText);
+  const parcelInfo = parseInstallmentPattern(rawText);
+  const installmentInfo = parseInstallments(parcelInfo.cleanedText);
   const paymentInfo = parsePayment(installmentInfo.cleanedText);
 
   let parsed;
@@ -172,6 +174,9 @@ router.post('/', async (req: AuthedRequest, res) => {
   parsed.cardNameGuess = paymentInfo.cardNameGuess;
   parsed.rawText = rawText;
   parsed.installmentsTotal = installmentInfo.installmentsTotal ?? 1;
+  parsed.installmentCurrent = parcelInfo.current ?? undefined;
+  parsed.installmentTotal = parcelInfo.total ?? undefined;
+  parsed.purchaseLabel = parcelInfo.purchaseLabel ?? parsed.description;
   const matchedCard =
     parsed.paymentMethod === 'CREDIT'
       ? await findCardByNameGuess(user.id, parsed.cardNameGuess)
@@ -201,23 +206,27 @@ router.post('/', async (req: AuthedRequest, res) => {
     const created = await Promise.all(
       installmentAmounts.map(async (installmentAmount, index) => {
         const installmentDate = buildInstallmentDate(baseDate, index);
-        const entry = await prisma.expense.create({
-          data: {
-            userId: user.id,
-            categoryId: category.id,
-            amountCents: installmentAmount,
-            paymentMethod: 'CREDIT',
-            cardId: matchedCard!.id,
-            description: `${parsed.description} (${index + 1}/${installmentsTotal})`,
-            date: installmentDate.toDate(),
-            source: 'pwa-quick',
-            rawText: parsed.rawText,
-            installmentGroupId: group.id,
-            installmentIndex: index + 1,
-            installmentsTotal,
-          },
-          include: { category: true, card: { select: CARD_SELECT } },
-        });
+          const entry = await prisma.expense.create({
+            data: {
+              userId: user.id,
+              categoryId: category.id,
+              amountCents: installmentAmount,
+              paymentMethod: 'CREDIT',
+              cardId: matchedCard!.id,
+              description: `${parsed.description} (${index + 1}/${installmentsTotal})`,
+              date: installmentDate.toDate(),
+              source: 'pwa-quick',
+              rawText: parsed.rawText,
+              installmentGroupId: group.id,
+              installmentIndex: index + 1,
+              installmentsTotal,
+              installmentCurrent: index + 1,
+              installmentTotal: installmentsTotal,
+              purchaseLabel: parsed.purchaseLabel ?? parsed.description,
+              postedMonth: installmentDate.format('YYYY-MM'),
+            },
+            include: { category: true, card: { select: CARD_SELECT } },
+          });
         return mapExpense(entry);
       }),
     );
@@ -255,6 +264,10 @@ router.post('/', async (req: AuthedRequest, res) => {
       date: parsed.date,
       source: 'pwa-quick',
       rawText: parsed.rawText,
+      purchaseLabel: parsed.purchaseLabel ?? parsed.description,
+      postedMonth: dayjs(parsed.date).tz(TZ).format('YYYY-MM'),
+      installmentCurrent: parsed.installmentCurrent ?? null,
+      installmentTotal: parsed.installmentTotal ?? null,
     },
     include: { category: true, card: { select: CARD_SELECT } },
   });
