@@ -106,7 +106,7 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 const corsMiddleware = cors(corsOptions);
-app.options("/*", corsMiddleware);
+app.options("/:path(*)", corsMiddleware);
 app.use(corsMiddleware);
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
