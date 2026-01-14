@@ -17,6 +17,7 @@
     "db:backup": "tsx scripts/db-backup.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:restore": "tsx scripts/db-restore.ts",
+    "seed:categories": "tsx scripts/seedCategories.ts",
     "db:backfill-amount-cents": "tsx scripts/backfillAmountCents.ts",
     "db:backup:render": "node dist/scripts/db-backup.js",
     "db:migrate-user-data": "tsx scripts/migrateUserData.ts",
