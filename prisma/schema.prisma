@@ -34,6 +34,7 @@ model User {
   cards       Card[]
   payments    CardPayment[]
   installmentGroups InstallmentGroup[]
+  credits     Credit[]
 }
 
 model Category {
@@ -219,4 +220,19 @@ model TelegramLinkCode {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+model Credit {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  amountCents Int
+  description String
+  source      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, updatedAt])
 }
