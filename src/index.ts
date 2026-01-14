@@ -94,7 +94,15 @@ async function safeSetWebhookWithRetry(webhookUrl: string) {
 const corsOptions = {
   origin: Array.from(corsAllowedOrigins),
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token", "X-Requested-With"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Admin-Token",
+    "X-Requested-With",
+    "Cache-Control",
+    "Pragma",
+    "Expires",
+  ],
   credentials: false,
   optionsSuccessStatus: 204,
 };
