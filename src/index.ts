@@ -33,6 +33,7 @@ const IS_RENDER = Boolean(process.env.RENDER);
 const app = express();
 const corsAllowedOrigins = new Set([
   "https://chatbot-despesas-pwa.onrender.com",
+  "https://despesas-pwa.onrender.com",
   "http://localhost:5173",
   "http://localhost:3000",
 ]);
@@ -107,7 +108,7 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 const corsMiddleware = cors(corsOptions);
-app.options(/.*/, corsMiddleware);
+app.options("/*", corsMiddleware);
 app.use(corsMiddleware);
 console.log(`[CORS] Enabled for origins: ${Array.from(corsAllowedOrigins).join(", ")}`);
 app.use(express.json());

@@ -67,14 +67,13 @@ function mapExpense(expense: {
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 type DateRangeValidationResult =
-  | { fromDate: Date; toDate: Date }
+  | { start: Date; end: Date }
   | { detail: string };
 
 function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
   const fromStr = typeof fromValue === "string" ? fromValue.trim() : "";
   const toStr = typeof toValue === "string" ? toValue.trim() : "";
 
-  // Validate format with regex
   if (!DATE_ONLY_REGEX.test(fromStr)) {
     return { detail: '"from" deve usar o formato YYYY-MM-DD' };
   }
@@ -82,28 +81,25 @@ function buildDateRange(fromValue: string, toValue: string): DateRangeValidation
     return { detail: '"to" deve usar o formato YYYY-MM-DD' };
   }
 
-  // Parse strictly with timezone
-  const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ);
-  const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ);
+  const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ, true);
+  const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ, true);
 
   if (!from.isValid()) {
-    return { detail: '"from" data inválida' };
+    return { detail: '"from" data invalida' };
   }
   if (!to.isValid()) {
-    return { detail: '"to" data inválida' };
+    return { detail: '"to" data invalida' };
   }
 
-  // Build date range with start and end of day
-  const fromDate = from.startOf("day").toDate();
-  const toDate = to.endOf("day").toDate();
+  const start = from.startOf("day").toDate();
+  const end = to.endOf("day").toDate();
 
-  if (fromDate.getTime() > toDate.getTime()) {
+  if (start.getTime() > end.getTime()) {
     return { detail: '"from" precisa ser anterior ou igual a "to"' };
   }
 
-  return { fromDate, toDate };
+  return { start, end };
 }
-
 async function resolveCardIdForUser(userId: number, value: unknown) {
   if (typeof value === "undefined") {
     return { cardId: undefined as number | null | undefined };
@@ -149,38 +145,31 @@ router.get("/", async (req: AuthedRequest, res) => {
     const rawTo = Array.isArray(req.query.to) ? req.query.to[0] : req.query.to;
     const trimmedFrom = typeof rawFrom === "string" ? rawFrom.trim() : "";
     const trimmedTo = typeof rawTo === "string" ? rawTo.trim() : "";
-    
+
     logFrom = trimmedFrom || undefined;
     logTo = trimmedTo || undefined;
 
-    // Validate and parse date range
     if (!trimmedFrom || !trimmedTo) {
-      return res.status(400).json({ 
-        error: "Invalid date range",
-        details: { from: trimmedFrom || null, to: trimmedTo || null }
-      });
+      return res.status(400).json({ error: "Invalid date range" });
     }
 
     const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
     if ("detail" in validatedRange) {
       console.log("[entries] invalid date range", { from: trimmedFrom, to: trimmedTo, detail: validatedRange.detail });
-      return res.status(400).json({ 
-        error: "Invalid date range",
-        details: validatedRange.detail
-      });
+      return res.status(400).json({ error: "Invalid date range" });
     }
 
-    const { fromDate, toDate } = validatedRange;
-    console.log("[entries] date range parsed", { 
-      from: trimmedFrom, 
-      to: trimmedTo, 
-      fromDate: fromDate.toISOString(), 
-      toDate: toDate.toISOString() 
+    const { start, end } = validatedRange;
+    console.log("[entries] range", {
+      fromStr: trimmedFrom,
+      toStr: trimmedTo,
+      start: start.toISOString(),
+      end: end.toISOString(),
     });
 
     const filters: Prisma.ExpenseWhereInput[] = [
       { userId: user.id },
-      { date: { gte: fromDate, lte: toDate } },
+      { date: { gte: start, lte: end } },
     ];
 
     if (typeof source === "string" && source.trim()) {
@@ -224,7 +213,13 @@ router.get("/", async (req: AuthedRequest, res) => {
     });
 
     const items = expenses.map(mapExpense);
-    console.log("[entries] ok", { from: trimmedFrom, to: trimmedTo, count: items.length });
+    console.log("[entries] ok", {
+      from: trimmedFrom,
+      to: trimmedTo,
+      start: start.toISOString(),
+      end: end.toISOString(),
+      count: items.length,
+    });
     return res.json({ items });
   } catch (err) {
     console.error(
@@ -232,7 +227,7 @@ router.get("/", async (req: AuthedRequest, res) => {
       { from: logFrom ?? null, to: logTo ?? null },
       err instanceof Error ? err.stack ?? err.message : String(err),
     );
-    return res.status(500).json({ error: "Failed to fetch entries", code: "ENTRIES_LIST_FAILED" });
+    return res.status(500).json({ error: "Failed to fetch entries" });
   }
 });
 
