@@ -19,9 +19,6 @@ process.on("uncaughtException", (err: any) => {
 });
 
 const IS_DEV = process.env.NODE_ENV !== "production";
-const PWA_ORIGIN = process.env.PWA_ORIGIN;
-if (!PWA_ORIGIN) throw new Error("Defina PWA_ORIGIN nas variaveis de ambiente");
-
 const PORT = Number(process.env.PORT) || 3000;
 
 /**
@@ -31,14 +28,30 @@ const PORT = Number(process.env.PORT) || 3000;
 const IS_RENDER = Boolean(process.env.RENDER);
 
 const app = express();
-const corsAllowedOrigins = new Set([
+
+const allowedOrigins = new Set([
+  "https://despesas-pwa.onrender.com",
   "https://chatbot-despesas-pwa.onrender.com",
   "http://localhost:5173",
   "http://localhost:3000",
 ]);
-if (PWA_ORIGIN) {
-  corsAllowedOrigins.add(PWA_ORIGIN);
-}
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // requests server-to-server ou curl sem Origin
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.has(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
+    credentials: true,
+  }),
+);
+
+// responder preflight sempre
+app.options("*", cors());
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
 const WEBHOOK_BASE_DELAY_MS = 500;
@@ -91,25 +104,6 @@ async function safeSetWebhookWithRetry(webhookUrl: string) {
   console.error(`[webhook] Nao foi possivel registrar apos ${MAX_WEBHOOK_ATTEMPTS} tentativas. Continuando sem webhook.`);
 }
 
-const corsOptions = {
-  origin: Array.from(corsAllowedOrigins),
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "X-Admin-Token",
-    "X-Requested-With",
-    "Cache-Control",
-    "Pragma",
-    "Expires",
-  ],
-  credentials: false,
-  optionsSuccessStatus: 204,
-};
-const corsMiddleware = cors(corsOptions);
-app.options(/.*/, corsMiddleware);
-app.use(corsMiddleware);
-console.log(`[CORS] Enabled for origins: ${Array.from(corsAllowedOrigins).join(", ")}`);
 app.use(express.json());
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
