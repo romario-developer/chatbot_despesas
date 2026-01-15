@@ -67,12 +67,16 @@ function mapExpense(expense: {
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 type DateRangeValidationResult =
-  | { start: Date; end: Date }
+  | { start: Date; end: Date; fromStr: string; toStr: string }
   | { detail: string };
 
 function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
   const fromStr = typeof fromValue === "string" ? fromValue.trim() : "";
   const toStr = typeof toValue === "string" ? toValue.trim() : "";
+
+  if (!fromStr || !toStr) {
+    return { detail: "Parâmetros de data são obrigatórios" };
+  }
 
   if (!DATE_ONLY_REGEX.test(fromStr)) {
     return { detail: '"from" deve usar o formato YYYY-MM-DD' };
@@ -81,25 +85,26 @@ function buildDateRange(fromValue: string, toValue: string): DateRangeValidation
     return { detail: '"to" deve usar o formato YYYY-MM-DD' };
   }
 
-  const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ, true);
-  const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ, true);
+  const from = dayjs(fromStr, "YYYY-MM-DD", true).tz(TZ);
+  const to = dayjs(toStr, "YYYY-MM-DD", true).tz(TZ);
 
   if (!from.isValid()) {
-    return { detail: '"from" data invalida' };
+    return { detail: '"from" inválido' };
   }
   if (!to.isValid()) {
-    return { detail: '"to" data invalida' };
+    return { detail: '"to" inválido' };
   }
 
   const start = from.startOf("day").toDate();
   const end = to.endOf("day").toDate();
 
   if (start.getTime() > end.getTime()) {
-    return { detail: '"from" precisa ser anterior ou igual a "to"' };
+    return { detail: '"from" deve ser anterior ou igual a "to"' };
   }
 
-  return { start, end };
+  return { start, end, fromStr, toStr };
 }
+
 async function resolveCardIdForUser(userId: number, value: unknown) {
   if (typeof value === "undefined") {
     return { cardId: undefined as number | null | undefined };
@@ -150,19 +155,24 @@ router.get("/", async (req: AuthedRequest, res) => {
     logTo = trimmedTo || undefined;
 
     if (!trimmedFrom || !trimmedTo) {
+      console.log("[entries] invalid date range", { from: trimmedFrom || null, to: trimmedTo || null });
       return res.status(400).json({ error: "Invalid date range" });
     }
 
     const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
     if ("detail" in validatedRange) {
-      console.log("[entries] invalid date range", { from: trimmedFrom, to: trimmedTo, detail: validatedRange.detail });
+      console.log("[entries] invalid date range", {
+        from: trimmedFrom,
+        to: trimmedTo,
+        detail: validatedRange.detail,
+      });
       return res.status(400).json({ error: "Invalid date range" });
     }
 
-    const { start, end } = validatedRange;
+    const { start, end, fromStr, toStr } = validatedRange;
     console.log("[entries] range", {
-      fromStr: trimmedFrom,
-      toStr: trimmedTo,
+      fromStr,
+      toStr,
       start: start.toISOString(),
       end: end.toISOString(),
     });
@@ -213,21 +223,18 @@ router.get("/", async (req: AuthedRequest, res) => {
     });
 
     const items = expenses.map(mapExpense);
-    console.log("[entries] ok", {
-      from: trimmedFrom,
-      to: trimmedTo,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      count: items.length,
-    });
+    console.log("[entries] ok", { from: fromStr, to: toStr, count: items.length });
     return res.json({ items });
   } catch (err) {
-    console.error(
-      "[entries] failed",
-      { from: logFrom ?? null, to: logTo ?? null },
-      err instanceof Error ? err.stack ?? err.message : String(err),
-    );
-    return res.status(500).json({ error: "Failed to fetch entries" });
+    console.error("[entries] error", { from: logFrom ?? null, to: logTo ?? null }, err);
+    const includeDetail = process.env.NODE_ENV !== "production";
+    const detail = includeDetail
+      ? err instanceof Error
+        ? err.stack ?? err.message
+        : String(err)
+      : undefined;
+    const payload = detail ? { error: "Failed to fetch entries", detail } : { error: "Failed to fetch entries" };
+    return res.status(500).json(payload);
   }
 });
 
