@@ -154,18 +154,28 @@ router.get("/", async (req: AuthedRequest, res) => {
     logFrom = trimmedFrom || undefined;
     logTo = trimmedTo || undefined;
 
+    if (!trimmedFrom || !trimmedTo) {
+      console.log("[entries] invalid date range", { from: trimmedFrom || null, to: trimmedTo || null });
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
     const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
     if ("detail" in validatedRange) {
       console.log("[entries] invalid date range", {
-        from: trimmedFrom || null,
-        to: trimmedTo || null,
+        from: trimmedFrom,
+        to: trimmedTo,
         detail: validatedRange.detail,
       });
       return res.status(400).json({ error: "Invalid date range" });
     }
 
     const { start, end, fromStr, toStr } = validatedRange;
-    console.log("[entries] range", { fromStr, toStr, start, end });
+    console.log("[entries] range", {
+      fromStr,
+      toStr,
+      start: start.toISOString(),
+      end: end.toISOString(),
+    });
 
     const filters: Prisma.ExpenseWhereInput[] = [
       { userId: user.id },
@@ -216,12 +226,15 @@ router.get("/", async (req: AuthedRequest, res) => {
     console.log("[entries] ok", { from: fromStr, to: toStr, count: items.length });
     return res.json({ items });
   } catch (err) {
-    console.error(
-      "[entries] failed",
-      { from: logFrom ?? null, to: logTo ?? null },
-      err instanceof Error ? err.stack ?? err.message : String(err),
-    );
-    return res.status(500).json({ error: "Failed to fetch entries" });
+    console.error("[entries] error", { from: logFrom ?? null, to: logTo ?? null }, err);
+    const includeDetail = process.env.NODE_ENV !== "production";
+    const detail = includeDetail
+      ? err instanceof Error
+        ? err.stack ?? err.message
+        : String(err)
+      : undefined;
+    const payload = detail ? { error: "Failed to fetch entries", detail } : { error: "Failed to fetch entries" };
+    return res.status(500).json(payload);
   }
 });
 
