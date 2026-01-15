@@ -68,32 +68,38 @@ const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 type DateRangeValidationResult =
   | { start: Date; end: Date; fromStr: string; toStr: string }
-  | { error: true };
+  | { detail: string };
 
 function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
   const fromStr = typeof fromValue === "string" ? fromValue.trim() : "";
   const toStr = typeof toValue === "string" ? toValue.trim() : "";
 
   if (!fromStr || !toStr) {
-    return { error: true };
+    return { detail: "Parâmetros de data são obrigatórios" };
   }
 
-  if (!DATE_ONLY_REGEX.test(fromStr) || !DATE_ONLY_REGEX.test(toStr)) {
-    return { error: true };
+  if (!DATE_ONLY_REGEX.test(fromStr)) {
+    return { detail: '"from" deve usar o formato YYYY-MM-DD' };
+  }
+  if (!DATE_ONLY_REGEX.test(toStr)) {
+    return { detail: '"to" deve usar o formato YYYY-MM-DD' };
   }
 
-  const from = dayjs.tz(fromStr, "YYYY-MM-DD", TZ, true);
-  const to = dayjs.tz(toStr, "YYYY-MM-DD", TZ, true);
+  const from = dayjs(fromStr, "YYYY-MM-DD", true).tz(TZ);
+  const to = dayjs(toStr, "YYYY-MM-DD", true).tz(TZ);
 
-  if (!from.isValid() || !to.isValid()) {
-    return { error: true };
+  if (!from.isValid()) {
+    return { detail: '"from" inválido' };
+  }
+  if (!to.isValid()) {
+    return { detail: '"to" inválido' };
   }
 
   const start = from.startOf("day").toDate();
   const end = to.endOf("day").toDate();
 
   if (start.getTime() > end.getTime()) {
-    return { error: true };
+    return { detail: '"from" deve ser anterior ou igual a "to"' };
   }
 
   return { start, end, fromStr, toStr };
@@ -149,10 +155,11 @@ router.get("/", async (req: AuthedRequest, res) => {
     logTo = trimmedTo || undefined;
 
     const validatedRange = buildDateRange(trimmedFrom, trimmedTo);
-    if ("error" in validatedRange) {
+    if ("detail" in validatedRange) {
       console.log("[entries] invalid date range", {
         from: trimmedFrom || null,
         to: trimmedTo || null,
+        detail: validatedRange.detail,
       });
       return res.status(400).json({ error: "Invalid date range" });
     }
