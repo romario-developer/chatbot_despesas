@@ -36,22 +36,20 @@ const allowedOrigins = new Set([
   "http://localhost:3000",
 ]);
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // requests server-to-server ou curl sem Origin
-      if (!origin) return cb(null, true);
-      if (allowedOrigins.has(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
-    credentials: true,
-  }),
-);
+const corsOptions = {
+  origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.has(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
+  credentials: true,
+};
 
-// responder preflight sempre
-app.options("*", cors());
+const corsMiddleware = cors(corsOptions);
+app.options("*", corsMiddleware);
+app.use(corsMiddleware);
 
 const MAX_WEBHOOK_ATTEMPTS = 5;
 const WEBHOOK_BASE_DELAY_MS = 500;
