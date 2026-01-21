@@ -2,7 +2,7 @@ import type { Card } from '@prisma/client';
 
 import { centsToNumber } from './money';
 
--export type CardDto = {
+export type CardDto = {
   id: number;
   userId: number;
   name: string;
