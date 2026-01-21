@@ -127,6 +127,8 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   }
   const asOf = asOfBase.startOf('day');
 
+  console.log('[cards/invoices] userId=%s asOf=%s', userId, asOf.format('YYYY-MM-DD'));
+
   const cards = await prisma.card.findMany({
     where: { userId },
     orderBy: { name: 'asc' },
@@ -147,7 +149,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.message.includes('CardPayment')
       ) {
-        console.warn('[cards][invoices] cardPayment table missing, skipping payments', {
+        console.warn('[cards/invoices] cardPayment table missing, skipping payments', {
           cardId,
           error: err.message,
         });
@@ -161,23 +163,36 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
     cards.map(async (card) => {
       const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
       const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
-      const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ);
-      const cycleEndStart = cycleEnd.startOf('day');
-      const cycleEndEnd = cycleEnd.endOf('day');
+      const cycleEndDay = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day');
+      const cycleEndStart = cycleEndDay.startOf('day');
+
       const expenseTotals = await prisma.expense.aggregate({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycleStart.toDate(), lte: cycleEndEnd.toDate() },
+          date: { gte: cycleStart.toDate(), lte: cycleEndDay.toDate() },
         },
         _sum: { amountCents: true },
         _count: { _all: true },
       });
+
       const paymentTotals = await sumCardPayments(card.id, cycleEndStart.toDate());
       const expenseCents = expenseTotals._sum.amountCents ?? 0;
       const paymentCents = paymentTotals._sum.amountCents ?? 0;
-      const netCents = Math.max(0, expenseCents - paymentCents);
+      const remainingCents = Math.max(0, expenseCents - paymentCents);
+      const invoiceTotal = centsToNumber(expenseCents);
+      const paidTotal = centsToNumber(paymentCents);
+      const remaining = centsToNumber(remainingCents);
+
+      const status =
+        invoiceTotal > 0 && remaining === 0
+          ? 'PAGA'
+          : asOf.isAfter(cycleEndDay)
+          ? 'FECHADA'
+          : 'ABERTA';
+      // status: PAGA quando remaining == 0 e invoiceTotal > 0; FECHADA quando passou do ciclo e ainda existe pendência; caso contrário ABERTA.
+
       return {
         cardId: card.id,
         name: card.name,
@@ -187,8 +202,11 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         dueDay: card.dueDay,
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
-        invoiceTotal: centsToNumber(netCents),
+        invoiceTotal,
         entriesCount: expenseTotals._count._all ?? 0,
+        paidTotal,
+        remaining,
+        status,
       };
     }),
   );
@@ -202,7 +220,7 @@ router.post('/payments', async (req: AuthedRequest, res) => {
   }
   const userId = req.user.id;
 
-  const { cardId, amount, paymentDate } = req.body ?? {};
+  const { cardId, amount, paidAt, paymentDate } = req.body ?? {};
   const parsedCardId =
     typeof cardId === 'number'
       ? cardId
@@ -226,17 +244,20 @@ router.post('/payments', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'amount deve ser maior que zero' });
   }
 
-  const rawDate =
-    typeof paymentDate === 'string' && paymentDate.trim() ? paymentDate.trim() : undefined;
-  const parsedDate = rawDate
-    ? dayjs.tz(rawDate, 'YYYY-MM-DD', TZ)
-    : nowBahia().tz(TZ);
-  if (!parsedDate.isValid()) {
-    return res.status(400).json({ error: '"paymentDate" invalido. Use YYYY-MM-DD.' });
+  const rawPaidAt =
+    typeof paidAt === 'string' && paidAt.trim()
+      ? paidAt.trim()
+      : typeof paymentDate === 'string' && paymentDate.trim()
+        ? paymentDate.trim()
+        : undefined;
+  const parsedPaidAt = rawPaidAt ? dayjs.tz(rawPaidAt, 'YYYY-MM-DD', TZ) : nowBahia().tz(TZ);
+  if (!parsedPaidAt.isValid()) {
+    return res.status(400).json({ error: '"paidAt" invalido. Use YYYY-MM-DD.' });
   }
-  const resolvedDate = parsedDate.startOf('day');
+  const resolvedDate = parsedPaidAt.startOf('day');
 
   const cycle = getCardCycleRange(resolvedDate.toDate(), card.closingDay);
+  const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
   const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).startOf('day');
 
   const payment = await prisma.cardPayment.create({
@@ -249,12 +270,23 @@ router.post('/payments', async (req: AuthedRequest, res) => {
     },
   });
 
+  console.log('[cards/payments] created', {
+    id: payment.id,
+    userId,
+    cardId: card.id,
+    amountCents: payment.amountCents,
+    paidAt: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
+    cycleEnd: dayjs(payment.cycleEnd).tz(TZ).format('YYYY-MM-DD'),
+  });
+
   return res.status(201).json({
     id: payment.id,
     cardId: payment.cardId,
     amount: centsToNumber(payment.amountCents),
     paymentDate: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
+    paidAt: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
     cycleEnd: dayjs(payment.cycleEnd).tz(TZ).format('YYYY-MM-DD'),
+    cycleStart: cycle.startDate,
     createdAt: payment.createdAt,
   });
 });

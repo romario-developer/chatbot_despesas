@@ -44,6 +44,7 @@ router.get('/summary', async (req: AuthedRequest, res) => {
         where: {
           userId,
           date: { gte: start, lt: endExclusive },
+          paymentMethod: { not: "CREDIT" },
         },
         by: ['categoryId'],
         _sum: { amountCents: true },

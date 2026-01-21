@@ -42,23 +42,27 @@ export async function getMonthlySummary(params: { userId: number; month: string 
 
   const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
 
-  const where = {
+  const baseWhere = {
     userId,
     date: { gte: start, lt: endExclusive },
+  } as const;
+  const cashWhere = {
+    ...baseWhere,
+    paymentMethod: { not: "CREDIT" },
   } as const;
 
   const [expenses, totalsAgg, totalsBySource] = await Promise.all([
     prisma.expense.findMany({
-      where,
+      where: cashWhere,
       include: { category: true },
     }),
     prisma.expense.aggregate({
-      where,
+      where: cashWhere,
       _sum: { amountCents: true },
       _count: { _all: true },
     }),
     prisma.expense.groupBy({
-      where,
+      where: cashWhere,
       by: ["source"],
       _count: { _all: true },
       _sum: { amountCents: true },

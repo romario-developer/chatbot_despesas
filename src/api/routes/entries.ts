@@ -309,6 +309,14 @@ router.post("/", async (req: AuthedRequest, res) => {
     }
   }
 
+  const isCreditPayment = paymentMethod === "CREDIT";
+  const resolvedCardId = typeof cardCheck.cardId === "number" ? cardCheck.cardId : null;
+  if (isCreditPayment && resolvedCardId === null) {
+    return res
+      .status(400)
+      .json({ error: '"cardId" e obrigatorio para pagamento com paymentMethod=CREDIT' });
+  }
+
   const parcelInfo = parseInstallmentPattern(descriptionText);
   const expense = await prisma.expense.create({
     data: {
@@ -316,7 +324,7 @@ router.post("/", async (req: AuthedRequest, res) => {
       categoryId,
       amountCents,
       paymentMethod: paymentMethod ?? DEFAULT_PAYMENT_METHOD,
-      ...(typeof cardCheck.cardId !== "undefined" ? { cardId: cardCheck.cardId } : {}),
+      ...(resolvedCardId !== null ? { cardId: resolvedCardId } : {}),
       description: descriptionText,
       date: parsedDate,
       rawText: descriptionText,
@@ -328,6 +336,14 @@ router.post("/", async (req: AuthedRequest, res) => {
       installmentTotal: parcelInfo.total ?? null,
     },
     include: { category: true, card: { select: CARD_SELECT } },
+  });
+
+  console.log("[entries] created", {
+    id: expense.id,
+    userId: user.id,
+    paymentMethod: expense.paymentMethod,
+    cardId: expense.cardId,
+    amountCents: expense.amountCents,
   });
 
   return res.status(201).json(mapExpense(expense));
