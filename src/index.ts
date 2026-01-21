@@ -58,7 +58,7 @@ const corsOptions = {
 };
 
 const corsMiddleware = cors(corsOptions);
-app.options("/*", corsMiddleware);
+app.options("*", corsMiddleware);
 app.use(corsMiddleware);
 console.log(`[CORS] Enabled for origins: ${Array.from(corsAllowedOrigins).join(", ")}`);
 
