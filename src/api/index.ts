@@ -36,6 +36,7 @@ router.use('/entries', entriesRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/cards', cardsRoutes);
 router.use('/credits', creditsRoutes);
+router.use('/credit', creditsRoutes);
 router.use('/debug', debugRoutes);
 router.use('/quick-entry', quickEntryRoutes);
 router.use('/categories', categoriesRoutes);

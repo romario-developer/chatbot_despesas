@@ -2,6 +2,8 @@ import { Router } from 'express';
 
 import { prisma } from '../../db/prisma';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { dayjs, nowBahia, TZ } from '../../utils/dates';
+import { getMonthRangeFromMonthYear } from '../../utils/dateRange';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -38,6 +40,13 @@ async function resolveUser(req: AuthedRequest) {
   return null;
 }
 
+function parseMonthParam(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) return null;
+  return normalized;
+}
+
 // GET /credits - List all credits for the user
 router.get('/', async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
@@ -56,6 +65,82 @@ router.get('/', async (req: AuthedRequest, res) => {
   } catch (error) {
     console.error('[credits] error listing credits', error);
     return res.status(500).json({ error: 'Erro ao listar créditos' });
+  }
+});
+
+router.get('/overview', async (req: AuthedRequest, res) => {
+  const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const providedMonth = typeof req.query.month !== 'undefined';
+  const parsedMonth = parseMonthParam(req.query.month);
+  if (providedMonth && !parsedMonth) {
+    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  }
+
+  const month = parsedMonth ?? nowBahia().format('YYYY-MM');
+  const parsed = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ);
+  if (!parsed.isValid()) {
+    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  }
+
+  const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
+
+  try {
+    const credits = await prisma.credit.findMany({
+      where: {
+        userId: user.id,
+        createdAt: {
+          gte: start,
+          lt: endExclusive,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const totalAmountCents = credits.reduce((sum, credit) => sum + credit.amountCents, 0);
+    const totalAmount = centsToNumber(totalAmountCents);
+    const averageAmount =
+      credits.length > 0 ? centsToNumber(Math.round(totalAmountCents / credits.length)) : 0;
+
+    const bySourceMap = new Map<string | null, { source: string | null; totalCents: number; count: number }>();
+    for (const credit of credits) {
+      const key = credit.source ?? null;
+      const existing = bySourceMap.get(key);
+      if (existing) {
+        existing.totalCents += credit.amountCents;
+        existing.count += 1;
+      } else {
+        bySourceMap.set(key, {
+          source: credit.source,
+          totalCents: credit.amountCents,
+          count: 1,
+        });
+      }
+    }
+
+    const bySource = Array.from(bySourceMap.values())
+      .map((entry) => ({
+        source: entry.source,
+        totalAmount: centsToNumber(entry.totalCents),
+        count: entry.count,
+      }))
+      .sort((a, b) => b.totalAmount - a.totalAmount);
+
+    return res.json({
+      month,
+      totalAmount,
+      totalAmountCents,
+      averageAmount,
+      creditCount: credits.length,
+      bySource,
+      items: credits.map(mapCredit),
+    });
+  } catch (error) {
+    console.error('[credits] error fetching overview', error);
+    return res.status(500).json({ error: 'Erro ao carregar o panorama de creditos' });
   }
 });
 
