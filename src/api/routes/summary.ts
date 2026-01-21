@@ -47,6 +47,10 @@ router.get('/', async (req: AuthedRequest, res) => {
       fixas: summary.fixedPlannedTotal,
       saldo: summary.balance,
       saldoPrevisto: summary.forecastBalance,
+      receitas: summary.receitas,
+      gastosCaixa: summary.gastosCaixa,
+      gastosCredito: summary.gastosCredito,
+      saldoEmConta: summary.saldoEmConta,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo';

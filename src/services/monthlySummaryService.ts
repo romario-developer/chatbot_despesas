@@ -22,6 +22,10 @@ export type MonthlySummaryResult = {
   fixedPlannedTotal: number;
   balance: number;
   forecastBalance: number;
+  receitas: number;
+  gastosCaixa: number;
+  gastosCredito: number;
+  saldoEmConta: number;
 };
 
 export async function getMonthlySummary(params: { userId: number; month: string }) {
@@ -46,25 +50,39 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     userId,
     date: { gte: start, lt: endExclusive },
   } as const;
+
   const cashWhere = {
     ...baseWhere,
     paymentMethod: { not: "CREDIT" },
   } as const;
 
-  const [expenses, totalsAgg, totalsBySource] = await Promise.all([
+  const creditWhere = {
+    ...baseWhere,
+    paymentMethod: "CREDIT",
+  } as const;
+
+  const [expenses, totalsAgg, totalsBySource, cashAgg, creditAgg] = await Promise.all([
     prisma.expense.findMany({
-      where: cashWhere,
+      where: baseWhere,
       include: { category: true },
     }),
     prisma.expense.aggregate({
-      where: cashWhere,
+      where: baseWhere,
       _sum: { amountCents: true },
       _count: { _all: true },
     }),
     prisma.expense.groupBy({
-      where: cashWhere,
+      where: baseWhere,
       by: ["source"],
       _count: { _all: true },
+      _sum: { amountCents: true },
+    }),
+    prisma.expense.aggregate({
+      where: cashWhere,
+      _sum: { amountCents: true },
+    }),
+    prisma.expense.aggregate({
+      where: creditWhere,
       _sum: { amountCents: true },
     }),
   ]);
@@ -92,8 +110,14 @@ export async function getMonthlySummary(params: { userId: number; month: string 
   const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
   const receita = salaryTotal + extrasTotal;
   const totalExpenses = centsToNumber(totalCents);
-  const balance = receita - totalExpenses;
-  const forecastBalance = receita - totalExpenses - fixedPlannedTotal;
+  const gastosCaixaCents = cashAgg._sum.amountCents ?? 0;
+  const gastosCreditoCents = creditAgg._sum.amountCents ?? 0;
+  const gastosCaixa = centsToNumber(gastosCaixaCents);
+  const gastosCredito = centsToNumber(gastosCreditoCents);
+  const receitas = receita;
+  const saldoEmConta = receitas - gastosCaixa;
+  const balance = saldoEmConta;
+  const forecastBalance = receitas - totalExpenses - fixedPlannedTotal;
 
   console.log("[monthly-summary]", { userId, month });
   console.log("SUMMARY", {
@@ -139,6 +163,10 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     salaryTotal,
     extrasTotal,
     fixedPlannedTotal,
+    receitas,
+    gastosCaixa,
+    gastosCredito,
+    saldoEmConta,
     balance,
     forecastBalance,
   };
