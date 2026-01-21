@@ -1,7 +1,8 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
-import { getMonthRangeFromMonthYear } from "../utils/dateRange";
+import { getMonthRangeFromIsoMonth } from "../utils/dateRange";
 import { assertValidAmountCents, centsToNumber } from "../utils/money";
 
 type SummaryCategory = { category: string; totalCents: number; total: number };
@@ -39,12 +40,9 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     throw new Error('Parametro "month" e obrigatorio no formato YYYY-MM');
   }
 
-  const parsed = dayjs.tz(`${month}-01`, "YYYY-MM-DD", TZ);
-  if (!parsed.isValid()) {
-    throw new Error('Parametro "month" invalido');
-  }
+  const { start, endExclusive } = getMonthRangeFromIsoMonth(month, TZ);
 
-  const { start, endExclusive } = getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), TZ);
+  const isDebugDashboard = process.env.DEBUG_DASHBOARD === "1";
 
   const baseWhere = {
     userId,
@@ -61,34 +59,71 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     paymentMethod: "CREDIT",
   } as const;
 
-  const [expenses, totalsAgg, totalsBySource, cashAgg, creditAgg] = await Promise.all([
-    prisma.expense.findMany({
-      where: baseWhere,
-      include: { category: true },
-    }),
-    prisma.expense.aggregate({
-      where: baseWhere,
+  const cardPaymentAggPromise = prisma.cardPayment
+    .aggregate({
+      where: {
+        userId,
+        paymentDate: { gte: start, lt: endExclusive },
+      },
       _sum: { amountCents: true },
       _count: { _all: true },
-    }),
-    prisma.expense.groupBy({
-      where: baseWhere,
-      by: ["source"],
-      _count: { _all: true },
-      _sum: { amountCents: true },
-    }),
-    prisma.expense.aggregate({
-      where: cashWhere,
-      _sum: { amountCents: true },
-    }),
-    prisma.expense.aggregate({
-      where: creditWhere,
-      _sum: { amountCents: true },
-    }),
-  ]);
+    })
+    .catch((err) => {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.message.includes("CardPayment")
+      ) {
+        if (isDebugDashboard) {
+          console.warn("[dashboard-debug] CardPayment aggregation skipped", {
+            userId,
+            month,
+            error: err.message,
+          });
+        }
+        return {
+          _sum: { amountCents: 0 },
+          _count: { _all: 0 },
+        };
+      }
+      throw err;
+    });
+
+  const [expenses, totalsAgg, totalsBySource, cashAgg, creditAgg, cardPaymentAgg] =
+    await Promise.all([
+      prisma.expense.findMany({
+        where: baseWhere,
+        include: { category: true },
+      }),
+      prisma.expense.aggregate({
+        where: baseWhere,
+        _sum: { amountCents: true },
+        _count: { _all: true },
+      }),
+      prisma.expense.groupBy({
+        where: baseWhere,
+        by: ["source"],
+        _count: { _all: true },
+        _sum: { amountCents: true },
+      }),
+      prisma.expense.aggregate({
+        where: cashWhere,
+        _sum: { amountCents: true },
+        _count: { _all: true },
+      }),
+      prisma.expense.aggregate({
+        where: creditWhere,
+        _sum: { amountCents: true },
+        _count: { _all: true },
+      }),
+      cardPaymentAggPromise,
+    ]);
 
   const expensesCount = totalsAgg._count?._all ?? 0;
   const totalCents = totalsAgg._sum.amountCents ?? 0;
+  const cashCount = cashAgg._count?._all ?? 0;
+  const creditCount = creditAgg._count?._all ?? 0;
+  const cardPaymentCount = cardPaymentAgg._count?._all ?? 0;
+  const cardPaymentCents = cardPaymentAgg._sum.amountCents ?? 0;
   const totalPorCategoria = new Map<string, number>();
   const totalPorDia = new Map<string, number>();
 
@@ -114,10 +149,28 @@ export async function getMonthlySummary(params: { userId: number; month: string 
   const gastosCreditoCents = creditAgg._sum.amountCents ?? 0;
   const gastosCaixa = centsToNumber(gastosCaixaCents);
   const gastosCredito = centsToNumber(gastosCreditoCents);
+  const cardPayments = centsToNumber(cardPaymentCents);
   const receitas = receita;
-  const saldoEmConta = receitas - gastosCaixa;
+  const saldoEmConta = receitas - gastosCaixa - cardPayments;
   const balance = saldoEmConta;
   const forecastBalance = receitas - totalExpenses - fixedPlannedTotal;
+
+  if (isDebugDashboard) {
+    console.log("[dashboard-debug] month", { month, start: start.toISOString(), end: endExclusive.toISOString() });
+    console.log("[dashboard-debug] counts", {
+      expenses: expensesCount,
+      cash: cashCount,
+      credit: creditCount,
+      cardPayments: cardPaymentCount,
+    });
+    console.log("[dashboard-debug] totals", {
+      receitas,
+      gastosCaixa,
+      gastosCredito,
+      cardPayments,
+      saldoEmConta,
+    });
+  }
 
   console.log("[monthly-summary]", { userId, month });
   console.log("SUMMARY", {

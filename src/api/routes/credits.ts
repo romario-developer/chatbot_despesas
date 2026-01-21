@@ -7,6 +7,7 @@ import { getMonthRangeFromMonthYear } from '../../utils/dateRange';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
+const CREDIT_DEBUG = process.env.DEBUG_CREDIT === '1';
 
 function parseLimit(value: unknown): number | null {
   const cents = toAmountCents(value);
@@ -47,6 +48,34 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
+function mapCardListItem(card: {
+  id: number;
+  userId: number;
+  name: string;
+  brand: string;
+  limit: number;
+  closingDay: number;
+  dueDay: number;
+  color: string;
+  textColor: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: card.id,
+    userId: card.userId,
+    name: card.name,
+    brand: card.brand,
+    limit: centsToNumber(card.limit),
+    closingDay: card.closingDay,
+    dueDay: card.dueDay,
+    color: card.color,
+    textColor: card.textColor,
+    createdAt: card.createdAt,
+    updatedAt: card.updatedAt,
+  };
+}
+
 // GET /credits - List all credits for the user
 router.get('/', async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
@@ -66,6 +95,31 @@ router.get('/', async (req: AuthedRequest, res) => {
     console.error('[credits] error listing credits', error);
     return res.status(500).json({ error: 'Erro ao listar créditos' });
   }
+});
+
+// GET /credits/cards -> returns all cards { id, userId, name, brand, limit, closingDay, dueDay, color, textColor, createdAt, updatedAt }
+router.get('/cards', async (req: AuthedRequest, res) => {
+  const user = await resolveUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const cards = await prisma.card.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const mapped = cards.map(mapCardListItem);
+  if (CREDIT_DEBUG) {
+    console.log('[credit-debug] GET /credit/cards', {
+      userId: user.id,
+      count: mapped.length,
+      params: req.params,
+      query: req.query,
+    });
+  }
+
+  return res.json(mapped);
 });
 
 router.get('/overview', async (req: AuthedRequest, res) => {

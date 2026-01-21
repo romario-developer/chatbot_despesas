@@ -297,15 +297,13 @@ router.get('/', async (req: AuthedRequest, res) => {
   }
   const userId = req.user.id;
 
-  console.log('[GET /api/cards] user:', req.user);
-  console.log('[GET /api/cards] userId:', req.user?.id);
-
   const cards = await prisma.card.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
   });
 
-  return res.json({ items: cards.map(mapCard) });
+  const mapped = cards.map(mapCard);
+  return res.json({ items: mapped, cards: mapped });
 });
 
 router.post('/', async (req: AuthedRequest, res) => {

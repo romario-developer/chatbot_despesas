@@ -3,6 +3,7 @@ import { dayjs, TZ } from "./dates";
 export const APP_TZ = TZ;
 
 type Range = { start: Date; endExclusive: Date };
+const MONTH_PARAM_REGEX = /^\d{4}-\d{2}$/;
 
 function toStartOfDay(value: string, tz: string) {
   const parsed =
@@ -33,6 +34,17 @@ export function getMonthRangeFromMonthYear(
   const start = dayjs.tz({ year, month: month - 1, day: 1 }, tz).startOf("day");
   const endExclusive = start.add(1, "month").startOf("day");
   return { start: start.toDate(), endExclusive: endExclusive.toDate() };
+}
+
+export function getMonthRangeFromIsoMonth(month: string, tz: string = APP_TZ): Range {
+  if (!MONTH_PARAM_REGEX.test(month)) {
+    throw new Error('Parametro "month" invalido. Use YYYY-MM.');
+  }
+  const parsed = dayjs.tz(`${month}-01`, "YYYY-MM-DD", tz);
+  if (!parsed.isValid()) {
+    throw new Error('Parametro "month" invalido.');
+  }
+  return getMonthRangeFromMonthYear(parsed.month() + 1, parsed.year(), tz);
 }
 
 export function parseFromToQuery(

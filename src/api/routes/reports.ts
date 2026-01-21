@@ -12,6 +12,7 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
+// GET /reports/monthly-summary?month=YYYY-MM -> returns full summary payload (see summary service for fields)
 router.get('/monthly-summary', async (req: AuthedRequest, res) => {
   const month = parseMonthParam(req.query.month);
   const userId = req.user?.id;

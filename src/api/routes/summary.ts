@@ -12,6 +12,7 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
+// GET /summary?month=YYYY-MM -> { month, total, totalExpenses, expensesCount, totalPorCategoria, totalPorDia, salary, extras, fixas, saldo, saldoPrevisto, receitas, gastosCaixa, gastosCredito, saldoEmConta }
 router.get('/', async (req: AuthedRequest, res) => {
   const month = parseMonthParam(req.query.month);
   const userId = req.user?.id;
