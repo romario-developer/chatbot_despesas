@@ -2,12 +2,12 @@ import { Router } from 'express';
 
 import { prisma } from '../../db/prisma';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { cardToDto, logCardDebug } from '../../utils/cardDto';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { getMonthRangeFromMonthYear } from '../../utils/dateRange';
 import type { AuthedRequest } from '../middleware/auth';
 
 const router = Router();
-const CREDIT_DEBUG = process.env.DEBUG_CREDIT === '1';
 
 function parseLimit(value: unknown): number | null {
   const cents = toAmountCents(value);
@@ -48,34 +48,6 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
-function mapCardListItem(card: {
-  id: number;
-  userId: number;
-  name: string;
-  brand: string;
-  limit: number;
-  closingDay: number;
-  dueDay: number;
-  color: string;
-  textColor: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
-  return {
-    id: card.id,
-    userId: card.userId,
-    name: card.name,
-    brand: card.brand,
-    limit: centsToNumber(card.limit),
-    closingDay: card.closingDay,
-    dueDay: card.dueDay,
-    color: card.color,
-    textColor: card.textColor,
-    createdAt: card.createdAt,
-    updatedAt: card.updatedAt,
-  };
-}
-
 // GET /credits - List all credits for the user
 router.get('/', async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
@@ -97,7 +69,8 @@ router.get('/', async (req: AuthedRequest, res) => {
   }
 });
 
-// GET /credits/cards -> returns all cards { id, userId, name, brand, limit, closingDay, dueDay, color, textColor, createdAt, updatedAt }
+// GET /credits/cards -> returns all cards with full DTO (id, name, brand, color, limit, closingDay, dueDay, createdAt, updatedAt)
+// Example response: [{ id: 1, name: 'Visa', brand: 'VISA', color: '#4F46E5', limit: 5000, closingDay: 5, dueDay: 20, createdAt: '...', updatedAt: '...' }]
 router.get('/cards', async (req: AuthedRequest, res) => {
   const user = await resolveUser(req);
   if (!user) {
@@ -109,16 +82,8 @@ router.get('/cards', async (req: AuthedRequest, res) => {
     orderBy: { createdAt: 'desc' },
   });
 
-  const mapped = cards.map(mapCardListItem);
-  if (CREDIT_DEBUG) {
-    console.log('[credit-debug] GET /credit/cards', {
-      userId: user.id,
-      count: mapped.length,
-      params: req.params,
-      query: req.query,
-    });
-  }
-
+  const mapped = cards.map(cardToDto);
+  logCardDebug('/api/credits/cards', mapped);
   return res.json(mapped);
 });
 

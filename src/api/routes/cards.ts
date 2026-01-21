@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../../db/prisma';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { cardToDto, logCardDebug } from '../../utils/cardDto';
 import { Prisma } from '@prisma/client';
 import { getCardCycleRange } from '../../domain/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
@@ -53,33 +54,6 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
-function mapCard(card: {
-  id: number;
-  userId: number;
-  name: string;
-  brand: string;
-  limit: number;
-  closingDay: number;
-  dueDay: number;
-  color: string;
-  textColor: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
-  return {
-    id: card.id,
-    userId: card.userId,
-    name: card.name,
-    brand: card.brand,
-    limit: centsToNumber(card.limit),
-    closingDay: card.closingDay,
-    dueDay: card.dueDay,
-    color: card.color,
-    textColor: card.textColor,
-    createdAt: card.createdAt,
-    updatedAt: card.updatedAt,
-  };
-}
 
 router.get('/summary', async (req: AuthedRequest, res) => {
   const userId = req.user?.id;
@@ -99,13 +73,11 @@ router.get('/summary', async (req: AuthedRequest, res) => {
     orderBy: { createdAt: 'desc' },
   });
 
-  const items = cards.map((card) => ({
-    cardId: card.id,
-    name: card.name,
-    brand: card.brand,
-    limit: centsToNumber(card.limit),
-    closingDay: card.closingDay,
-    dueDay: card.dueDay,
+  const dtos = cards.map(cardToDto);
+  logCardDebug('/api/cards/summary', dtos);
+  const items = dtos.map((dto) => ({
+    cardId: dto.id,
+    ...dto,
     spentInMonth: 0,
   }));
 
@@ -133,6 +105,8 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
     where: { userId },
     orderBy: { name: 'asc' },
   });
+  const cardDtos = cards.map(cardToDto);
+  logCardDebug('/api/cards/invoices', cardDtos);
 
   async function sumCardPayments(cardId: number, cycleEndStart: Date) {
     try {
@@ -160,7 +134,8 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   }
 
   const invoices = await Promise.all(
-    cards.map(async (card) => {
+    cards.map(async (card, index) => {
+      const dto = cardDtos[index];
       const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
       const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
       const cycleEndDay = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day');
@@ -195,11 +170,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
 
       return {
         cardId: card.id,
-        name: card.name,
-        brand: card.brand,
-        color: card.color,
-        closingDay: card.closingDay,
-        dueDay: card.dueDay,
+        ...dto,
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
         invoiceTotal,
@@ -302,8 +273,9 @@ router.get('/', async (req: AuthedRequest, res) => {
     orderBy: { createdAt: 'desc' },
   });
 
-  const mapped = cards.map(mapCard);
-  return res.json({ items: mapped, cards: mapped });
+  const cardDtos = cards.map(cardToDto);
+  logCardDebug('/api/cards', cardDtos);
+  return res.json({ items: cardDtos, cards: cardDtos });
 });
 
 router.post('/', async (req: AuthedRequest, res) => {
@@ -381,7 +353,9 @@ router.post('/', async (req: AuthedRequest, res) => {
       },
     });
 
-    return res.status(201).json(mapCard(card));
+    const dto = cardToDto(card);
+    logCardDebug('/api/cards', [dto]);
+    return res.status(201).json(dto);
   } catch (err) {
     console.error('[cards][post] erro ao salvar cartao', err);
     const message = err instanceof Error ? err.message : 'Erro ao salvar cartao';
@@ -492,7 +466,9 @@ router.put('/:id', async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: 'Cartao nao encontrado' });
   }
 
-  return res.json(mapCard(saved));
+  const dto = cardToDto(saved);
+  logCardDebug('/api/cards', [dto]);
+  return res.json(dto);
 });
 
 router.delete('/:id', async (req: AuthedRequest, res) => {
