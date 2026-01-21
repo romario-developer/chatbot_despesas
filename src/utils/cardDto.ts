@@ -2,7 +2,7 @@ import type { Card } from '@prisma/client';
 
 import { centsToNumber } from './money';
 
-export type CardDto = {
+-export type CardDto = {
   id: number;
   userId: number;
   name: string;
@@ -14,6 +14,18 @@ export type CardDto = {
   textColor: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type InvoiceViewDto = {
+  card: CardDto;
+  cardId: number;
+  cycleStart: string;
+  cycleEnd: string;
+  invoiceTotal: number;
+  paidTotal: number;
+  remaining: number;
+  status: 'PAGA' | 'FECHADA' | 'ABERTA';
+  statusCode: 'PAID' | 'CLOSED' | 'OPEN';
 };
 
 export function cardToDto(card: Card): CardDto {
@@ -32,8 +44,8 @@ export function cardToDto(card: Card): CardDto {
   };
 }
 
-export function logCardDebug(route: string, cards: CardDto[]) {
+export function logCardDebug(route: string, cards: CardDto[], meta?: Record<string, unknown>) {
   if (process.env.DEBUG_CARDS !== '1') return;
   const sample = cards.length ? cards[0] : null;
-  console.log('[card-debug]', { route, count: cards.length, sample });
+  console.log('[card-debug]', { route, count: cards.length, sample, ...meta });
 }

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../../db/prisma';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
-import { cardToDto, logCardDebug } from '../../utils/cardDto';
+import { cardToDto, InvoiceViewDto, logCardDebug } from '../../utils/cardDto';
 import { Prisma } from '@prisma/client';
 import { getCardCycleRange } from '../../domain/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
@@ -74,7 +74,7 @@ router.get('/summary', async (req: AuthedRequest, res) => {
   });
 
   const dtos = cards.map(cardToDto);
-  logCardDebug('/api/cards/summary', dtos);
+  logCardDebug('/api/cards/summary', dtos, { month });
   const items = dtos.map((dto) => ({
     cardId: dto.id,
     ...dto,
@@ -84,6 +84,42 @@ router.get('/summary', async (req: AuthedRequest, res) => {
   return res.json({ month, items });
 });
 
+// GET /api/cards/invoices?month=YYYY-MM|asOf=YYYY-MM-DD
+// Retorna InvoiceViewDTO (card completo, ciclo, totais e status). Exemplo:
+// {
+//   "asOf": "2026-01-31",
+//   "invoices": [
+//     {
+//       "card": {
+//         "id": 1,
+//         "userId": 7,
+//         "name": "Visa Corporativo",
+//         "brand": "VISA",
+//         "limit": 5000,
+//         "closingDay": 5,
+//         "dueDay": 20,
+//         "color": "#4F46E5",
+//         "textColor": "#FFFFFF",
+//         "createdAt": "2026-01-12T16:00:00.000Z",
+//         "updatedAt": "2026-01-12T16:00:00.000Z"
+//       },
+//       "cardId": 1,
+//       "name": "Visa Corporativo",
+//       "brand": "VISA",
+//       "limit": 5000,
+//       "closingDay": 5,
+//       "dueDay": 20,
+//       "cycleStart": "2026-01-06",
+//       "cycleEnd": "2026-02-05",
+//       "invoiceTotal": 1200,
+//       "entriesCount": 4,
+//       "paidTotal": 600,
+//       "remaining": 600,
+//       "status": "ABERTA",
+//       "statusCode": "OPEN"
+//     }
+//   ]
+// }
 router.get('/invoices', async (req: AuthedRequest, res) => {
   if (!req.user || !Number.isInteger(req.user.id)) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -93,20 +129,36 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   const rawAsOf = Array.isArray(req.query.asOf) ? req.query.asOf[0] : req.query.asOf;
   const asOfString = typeof rawAsOf === 'string' ? rawAsOf.trim() : undefined;
   const asOfCandidate = asOfString ? dayjs.tz(asOfString, 'YYYY-MM-DD', TZ) : undefined;
-  const asOfBase = asOfCandidate ?? nowBahia().tz(TZ);
   if (asOfString && (!asOfCandidate || !asOfCandidate.isValid())) {
     return res.status(400).json({ error: 'Parametro "asOf" invalido. Use YYYY-MM-DD.' });
   }
+
+  const rawMonth = Array.isArray(req.query.month) ? req.query.month[0] : req.query.month;
+  const providedMonth = typeof rawMonth !== 'undefined';
+  const parsedMonth = parseMonthParam(rawMonth);
+  if (providedMonth && !parsedMonth) {
+    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  }
+
+  const monthAsOfCandidate = parsedMonth
+    ? dayjs.tz(`${parsedMonth}-01`, 'YYYY-MM-DD', TZ).endOf('month')
+    : undefined;
+  const asOfBase = monthAsOfCandidate ?? asOfCandidate ?? nowBahia().tz(TZ);
   const asOf = asOfBase.startOf('day');
 
-  console.log('[cards/invoices] userId=%s asOf=%s', userId, asOf.format('YYYY-MM-DD'));
+  console.log(
+    '[cards/invoices] userId=%s asOf=%s month=%s',
+    userId,
+    asOf.format('YYYY-MM-DD'),
+    parsedMonth ?? 'n/a',
+  );
 
   const cards = await prisma.card.findMany({
     where: { userId },
     orderBy: { name: 'asc' },
   });
   const cardDtos = cards.map(cardToDto);
-  logCardDebug('/api/cards/invoices', cardDtos);
+  logCardDebug('/api/cards/invoices', cardDtos, { month: parsedMonth, asOf: asOf.format('YYYY-MM-DD') });
 
   async function sumCardPayments(cardId: number, cycleEndStart: Date) {
     try {
@@ -134,7 +186,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   }
 
   const invoices = await Promise.all(
-    cards.map(async (card, index) => {
+    cards.map(async (card, index): Promise<InvoiceViewDto & { entriesCount: number }> => {
       const dto = cardDtos[index];
       const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
       const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
@@ -166,11 +218,12 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
           : asOf.isAfter(cycleEndDay)
           ? 'FECHADA'
           : 'ABERTA';
-      // status: PAGA quando remaining == 0 e invoiceTotal > 0; FECHADA quando passou do ciclo e ainda existe pendência; caso contrário ABERTA.
+      const statusCode = remaining === 0 ? 'PAID' : asOf.isAfter(cycleEndDay) ? 'CLOSED' : 'OPEN';
 
       return {
         cardId: card.id,
         ...dto,
+        card: dto,
         cycleStart: cycle.startDate,
         cycleEnd: cycle.endDate,
         invoiceTotal,
@@ -178,11 +231,16 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         paidTotal,
         remaining,
         status,
+        statusCode,
       };
     }),
   );
 
-  return res.json({ asOf: asOf.format('YYYY-MM-DD'), invoices });
+  return res.json({
+    asOf: asOf.format('YYYY-MM-DD'),
+    month: parsedMonth ?? asOf.format('YYYY-MM'),
+    invoices,
+  });
 });
 
 router.post('/payments', async (req: AuthedRequest, res) => {
@@ -262,6 +320,7 @@ router.post('/payments', async (req: AuthedRequest, res) => {
   });
 });
 
+// GET /api/cards -> lista CardDTO completo (inclui brand/color/limit/closingDay/dueDay). Exemplo: [{ id:1, name:'Visa', brand:'VISA', color:'#4F46E5', limit:5000, closingDay:5, dueDay:20, createdAt:'2026-01-12T16:00:00Z', updatedAt:'2026-01-12T16:00:00Z' }]
 router.get('/', async (req: AuthedRequest, res) => {
   if (!req.user || !Number.isInteger(req.user.id)) {
     return res.status(401).json({ error: 'Unauthorized' });
