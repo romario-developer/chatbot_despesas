@@ -225,32 +225,30 @@ router.get("/", async (req: AuthedRequest, res) => {
     const hasPaymentMethodParam = trimmedPaymentMethod !== "";
     const hasPaymentParam = trimmedPayment !== "";
 
-    let selectedPaymentMethod: PaymentMethod | null = null;
-    if (hasPaymentMethodParam) {
-      const normalized = normalizePaymentMethod(trimmedPaymentMethod);
-      if (!normalized) {
-        return res.status(400).json({ error: '"paymentMethod" invalido' });
-      }
-      selectedPaymentMethod = normalized;
+    const normalizedPaymentMethod =
+      hasPaymentMethodParam && trimmedPaymentMethod ? normalizePaymentMethod(trimmedPaymentMethod) : null;
+    if (hasPaymentMethodParam && !normalizedPaymentMethod) {
+      return res.status(400).json({ error: '"paymentMethod" invalido' });
+    }
+    const normalizedPayment =
+      hasPaymentParam && trimmedPayment ? normalizePaymentMethod(trimmedPayment) : null;
+    if (hasPaymentParam && !normalizedPayment) {
+      return res.status(400).json({ error: '"payment" invalido' });
+    }
 
-      if (hasPaymentParam) {
-        const aliasNormalized = normalizePaymentMethod(trimmedPayment);
-        if (!aliasNormalized) {
-          return res.status(400).json({ error: '"payment" invalido' });
-        }
-        if (aliasNormalized !== normalized) {
+    let selectedPaymentMethod: PaymentMethod | null = null;
+    if (hasPaymentMethodParam && hasPaymentParam) {
+      if (normalizedPayment !== normalizedPaymentMethod) {
         return res.status(400).json({
           error:
-            '"payment" e "paymentMethod" estao em conflito: use apenas um ou garanta que tenham o mesmo valor',
+            'Parametros "payment" e "paymentMethod" estao em conflito; use apenas um ou coloque o mesmo valor em ambos',
         });
-        }
       }
+      selectedPaymentMethod = normalizedPaymentMethod;
+    } else if (hasPaymentMethodParam) {
+      selectedPaymentMethod = normalizedPaymentMethod;
     } else if (hasPaymentParam) {
-      const aliasNormalized = normalizePaymentMethod(trimmedPayment);
-      if (!aliasNormalized) {
-        return res.status(400).json({ error: '"payment" invalido' });
-      }
-      selectedPaymentMethod = aliasNormalized;
+      selectedPaymentMethod = normalizedPayment;
     }
 
     if (selectedPaymentMethod) {
