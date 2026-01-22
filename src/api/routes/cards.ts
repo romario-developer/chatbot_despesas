@@ -103,6 +103,31 @@ function resolveDueDate(cycleEnd: Dayjs, dueDay: number, closingDay: number): Da
   return candidate.date(day).startOf('day');
 }
 
+async function sumCardPayments(userId: number, cardId: number, cycleEndStart: Date) {
+  try {
+    return await prisma.cardPayment.aggregate({
+      where: {
+        userId,
+        cardId,
+        cycleEnd: cycleEndStart,
+      },
+      _sum: { amountCents: true },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.message.includes('CardPayment')
+    ) {
+      console.warn('[cards/invoices] cardPayment table missing, skipping payments', {
+        cardId,
+        error: err.message,
+      });
+      return { _sum: { amountCents: 0 } };
+    }
+    throw err;
+  }
+}
+
 
 router.get('/summary', async (req: AuthedRequest, res) => {
   const userId = req.user?.id;
@@ -205,30 +230,6 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   const cardDtos = cards.map(cardToDto);
   logCardDebug('/api/cards/invoices', cardDtos, { month: parsedMonth, asOf: asOf.format('YYYY-MM-DD') });
 
-  async function sumCardPayments(cardId: number, cycleEndStart: Date) {
-    try {
-      return await prisma.cardPayment.aggregate({
-        where: {
-          userId,
-          cardId,
-          cycleEnd: cycleEndStart,
-        },
-        _sum: { amountCents: true },
-      });
-    } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.message.includes('CardPayment')
-      ) {
-        console.warn('[cards/invoices] cardPayment table missing, skipping payments', {
-          cardId,
-          error: err.message,
-        });
-        return { _sum: { amountCents: 0 } };
-      }
-      throw err;
-    }
-  }
 
   const invoices = await Promise.all(
     cards.map(async (card, index): Promise<InvoiceViewDto> => {
@@ -252,7 +253,7 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
         _count: { _all: true },
       });
 
-      const paymentTotals = await sumCardPayments(card.id, cycleEndStart.toDate());
+      const paymentTotals = await sumCardPayments(userId, card.id, cycleEndStart.toDate());
       const expenseCents = expenseTotals._sum.amountCents ?? 0;
       const paymentCents = paymentTotals._sum.amountCents ?? 0;
       const remainingCents = Math.max(0, expenseCents - paymentCents);
@@ -282,6 +283,164 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
     asOf: asOf.format('YYYY-MM-DD'),
     month: parsedMonth ?? asOf.format('YYYY-MM'),
     invoices,
+  });
+});
+
+router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const parsedCardId =
+    typeof req.params.cardId === 'string' ? Number.parseInt(req.params.cardId.trim(), 10) : NaN;
+  if (!Number.isInteger(parsedCardId) || parsedCardId <= 0) {
+    return res.status(400).json({ error: 'cardId invalido' });
+  }
+
+  const rawCycleEnd = typeof req.params.cycleEnd === 'string' ? req.params.cycleEnd.trim() : '';
+  if (!rawCycleEnd) {
+    return res.status(400).json({ error: 'cycleEnd obrigatorio. Use YYYY-MM-DD.' });
+  }
+
+  const parsedCycleEnd = dayjs.tz(rawCycleEnd, 'YYYY-MM-DD', true, TZ);
+  if (!parsedCycleEnd.isValid()) {
+    return res.status(400).json({ error: 'cycleEnd invalido. Use YYYY-MM-DD.' });
+  }
+
+  const card = await prisma.card.findFirst({
+    where: { id: parsedCardId, userId },
+  });
+  if (!card) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const cycleMonth = parsedCycleEnd.format('YYYY-MM');
+  const cycleRange = buildCycleForClosingMonth(cycleMonth, card.closingDay);
+  if (!cycleRange.end.isSame(parsedCycleEnd.endOf('day'))) {
+    return res.status(400).json({ error: 'cycleEnd invalido para esse cartao' });
+  }
+
+  const dueDate = resolveDueDate(cycleRange.end, card.dueDay, card.closingDay);
+
+  const filters: Prisma.ExpenseWhereInput[] = [
+    { userId },
+    { cardId: card.id },
+    { paymentMethod: 'CREDIT' },
+    { date: { gte: cycleRange.start.toDate(), lte: cycleRange.end.toDate() } },
+  ];
+
+  const rawSearch = Array.isArray(req.query.search) ? req.query.search[0] : req.query.search;
+  const search = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+  if (search) {
+    filters.push({ description: { contains: search, mode: 'insensitive' } });
+  }
+
+  const rawPage = Array.isArray(req.query.page) ? req.query.page[0] : req.query.page;
+  let page = 1;
+  if (typeof rawPage !== 'undefined') {
+    const parsedPage = Number.parseInt(String(rawPage).trim(), 10);
+    if (!Number.isInteger(parsedPage) || parsedPage <= 0) {
+      return res.status(400).json({ error: '"page" invalido' });
+    }
+    page = parsedPage;
+  }
+
+  const rawLimit = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+  let limit = 20;
+  if (typeof rawLimit !== 'undefined') {
+    const parsedLimit = Number.parseInt(String(rawLimit).trim(), 10);
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: '"limit" invalido' });
+    }
+    limit = Math.min(parsedLimit, 100);
+  }
+
+  const rawSort = Array.isArray(req.query.sort) ? req.query.sort[0] : req.query.sort;
+  let sortDirection: 'asc' | 'desc' = 'desc';
+  if (typeof rawSort === 'string' && rawSort.trim()) {
+    const normalizedSort = rawSort.trim().toLowerCase();
+    if (normalizedSort !== 'asc' && normalizedSort !== 'desc') {
+      return res.status(400).json({ error: '"sort" deve ser asc ou desc' });
+    }
+    sortDirection = normalizedSort;
+  }
+
+  const whereClause: Prisma.ExpenseWhereInput = { AND: filters };
+
+  const [expenseTotals, purchasesCount, purchases] = await Promise.all([
+    prisma.expense.aggregate({
+      where: whereClause,
+      _sum: { amountCents: true },
+    }),
+    prisma.expense.count({ where: whereClause }),
+    prisma.expense.findMany({
+      where: whereClause,
+      include: { category: true },
+      orderBy: [{ date: sortDirection }, { createdAt: 'desc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+
+  const paymentTotals = await sumCardPayments(
+    userId,
+    card.id,
+    cycleRange.end.startOf('day').toDate(),
+  );
+
+  const expenseCents = expenseTotals._sum.amountCents ?? 0;
+  const paymentCents = paymentTotals._sum.amountCents ?? 0;
+  const remainingCents = Math.max(0, expenseCents - paymentCents);
+
+  const purchasesList = purchases.map((purchase) => {
+    const merchant =
+      purchase.purchaseLabel && purchase.purchaseLabel !== purchase.description
+        ? purchase.purchaseLabel
+        : undefined;
+    const hasInstallments =
+      purchase.installmentCurrent !== null || purchase.installmentTotal !== null;
+    const installmentInfo = hasInstallments
+      ? {
+          current: purchase.installmentCurrent ?? undefined,
+          total: purchase.installmentTotal ?? undefined,
+        }
+      : undefined;
+    return {
+      id: purchase.id,
+      description: purchase.description,
+      amount: centsToNumber(purchase.amountCents),
+      date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
+      category: purchase.category.name,
+      merchant,
+      installmentInfo,
+      createdAt: purchase.createdAt,
+    };
+  });
+
+  console.log(
+    '[cards/invoice-detail] userId=%s cardId=%s cycleEnd=%s page=%s limit=%s sort=%s search=%s',
+    userId,
+    card.id,
+    rawCycleEnd,
+    page,
+    limit,
+    sortDirection,
+    search || 'n/a',
+  );
+
+  return res.json({
+    card: cardToDto(card),
+    cycleStart: cycleRange.start.toISOString(),
+    cycleEnd: cycleRange.end.toISOString(),
+    closeDate: cycleRange.end.toISOString(),
+    dueDate: dueDate.toISOString(),
+    invoiceTotal: centsToNumber(expenseCents),
+    paidTotal: centsToNumber(paymentCents),
+    remaining: centsToNumber(remainingCents),
+    status: remainingCents > 0 ? 'OPEN' : 'PAID',
+    purchases: purchasesList,
+    purchasesCount,
   });
 });
 
