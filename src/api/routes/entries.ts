@@ -7,6 +7,7 @@ import { classifyCategoryByText, learnCategoryMemory } from "../../services/cate
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
 import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
+import type { PaymentMethod } from "../../utils/paymentMethod";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod } from "../../utils/paymentMethod";
 import {
   CARD_SELECT,
@@ -212,6 +213,48 @@ router.get("/", async (req: AuthedRequest, res) => {
           { category: { name: { contains: q.trim(), mode: "insensitive" } } },
         ],
       });
+    }
+
+    const rawPaymentMethod = Array.isArray(req.query.paymentMethod)
+      ? req.query.paymentMethod[0]
+      : req.query.paymentMethod;
+    const rawPayment = Array.isArray(req.query.payment) ? req.query.payment[0] : req.query.payment;
+    const trimmedPaymentMethod =
+      typeof rawPaymentMethod === "string" ? rawPaymentMethod.trim() : "";
+    const trimmedPayment = typeof rawPayment === "string" ? rawPayment.trim() : "";
+    const hasPaymentMethodParam = trimmedPaymentMethod !== "";
+    const hasPaymentParam = trimmedPayment !== "";
+
+    let selectedPaymentMethod: PaymentMethod | null = null;
+    if (hasPaymentMethodParam) {
+      const normalized = normalizePaymentMethod(trimmedPaymentMethod);
+      if (!normalized) {
+        return res.status(400).json({ error: '"paymentMethod" invalido' });
+      }
+      selectedPaymentMethod = normalized;
+
+      if (hasPaymentParam) {
+        const aliasNormalized = normalizePaymentMethod(trimmedPayment);
+        if (!aliasNormalized) {
+          return res.status(400).json({ error: '"payment" invalido' });
+        }
+        if (aliasNormalized !== normalized) {
+        return res.status(400).json({
+          error:
+            '"payment" e "paymentMethod" estao em conflito: use apenas um ou garanta que tenham o mesmo valor',
+        });
+        }
+      }
+    } else if (hasPaymentParam) {
+      const aliasNormalized = normalizePaymentMethod(trimmedPayment);
+      if (!aliasNormalized) {
+        return res.status(400).json({ error: '"payment" invalido' });
+      }
+      selectedPaymentMethod = aliasNormalized;
+    }
+
+    if (selectedPaymentMethod) {
+      filters.push({ paymentMethod: selectedPaymentMethod });
     }
 
     const where: Prisma.ExpenseWhereInput = filters.length ? { AND: filters } : {};
