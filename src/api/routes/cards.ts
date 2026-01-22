@@ -67,7 +67,7 @@ type DayjsCycleRange = {
   end: Dayjs;
 };
 
-function buildMonthClosingDate(base: dayjs.Dayjs, closingDay: number) {
+function buildMonthClosingDate(base: Dayjs, closingDay: number) {
   const monthDays = base.endOf('month').date();
   const day = Math.min(clampDay(closingDay), monthDays);
   return base.date(day).endOf('day');
@@ -82,7 +82,7 @@ function buildCycleForClosingMonth(month: string, closingDay: number): DayjsCycl
   return { start, end: currentClosing };
 }
 
-function buildCycleFromReference(reference: dayjs.Dayjs, closingDay: number): DayjsCycleRange {
+function buildCycleFromReference(reference: Dayjs, closingDay: number): DayjsCycleRange {
   const cycle = getCardCycleRange(reference.toDate(), closingDay);
   return {
     start: dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day'),
@@ -91,7 +91,7 @@ function buildCycleFromReference(reference: dayjs.Dayjs, closingDay: number): Da
 }
 
 // dueDay < closingDay typically moves the due date to the month after closing, otherwise stays in the closing month.
-function resolveDueDate(cycleEnd: dayjs.Dayjs, dueDay: number, closingDay: number): dayjs.Dayjs {
+function resolveDueDate(cycleEnd: Dayjs, dueDay: number, closingDay: number): Dayjs {
   const normalizedDue = clampDay(dueDay);
   const normalizedClosing = clampDay(closingDay);
   let candidate = cycleEnd.clone();
