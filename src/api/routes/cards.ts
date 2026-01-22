@@ -7,6 +7,7 @@ import { cardToDto, InvoiceViewDto, logCardDebug } from '../../utils/cardDto';
 import { Prisma } from '@prisma/client';
 import { getCardCycleRange } from '../../domain/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
+import type { Dayjs } from 'dayjs';
 
 const router = Router();
 
@@ -62,8 +63,8 @@ function clampDay(value: number): number {
 }
 
 type DayjsCycleRange = {
-  start: dayjs.Dayjs;
-  end: dayjs.Dayjs;
+  start: Dayjs;
+  end: Dayjs;
 };
 
 function buildMonthClosingDate(base: dayjs.Dayjs, closingDay: number) {
