@@ -286,6 +286,61 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   });
 });
 
+router.get('/invoices/open', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const reference = nowBahia().tz(TZ);
+  const cards = await prisma.card.findMany({
+    where: { userId },
+    orderBy: { name: 'asc' },
+  });
+
+  const invoices = await Promise.all(
+    cards.map(async (card) => {
+      const dto = cardToDto(card);
+      const cycleRange = buildCycleFromReference(reference, card.closingDay);
+      const cycleStart = cycleRange.start;
+      const cycleEnd = cycleRange.end;
+      const cycleEndStart = cycleEnd.clone().startOf('day');
+
+      const expenseTotals = await prisma.expense.aggregate({
+        where: {
+          userId,
+          cardId: card.id,
+          paymentMethod: 'CREDIT',
+          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
+        },
+        _sum: { amountCents: true },
+      });
+
+      const paymentTotals = await sumCardPayments(
+        userId,
+        card.id,
+        cycleEndStart.toDate(),
+      );
+
+      const expenseCents = expenseTotals._sum.amountCents ?? 0;
+      const paymentCents = paymentTotals._sum.amountCents ?? 0;
+      const remainingCents = Math.max(0, expenseCents - paymentCents);
+
+      return {
+        card: dto,
+        cycleStart: cycleStart.toISOString(),
+        cycleEnd: cycleEnd.toISOString(),
+        invoiceTotal: centsToNumber(expenseCents),
+        paidTotal: centsToNumber(paymentCents),
+        remaining: centsToNumber(remainingCents),
+        status: remainingCents > 0 ? 'OPEN' : 'PAID',
+      };
+    }),
+  );
+
+  return res.json({ invoices });
+});
+
 router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
   if (!req.user || !Number.isInteger(req.user.id)) {
     return res.status(401).json({ error: 'Unauthorized' });
