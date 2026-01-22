@@ -21,11 +21,12 @@ export type InvoiceViewDto = {
   cardId: number;
   cycleStart: string;
   cycleEnd: string;
+  dueDate: string;
   invoiceTotal: number;
   paidTotal: number;
   remaining: number;
-  status: 'PAGA' | 'FECHADA' | 'ABERTA';
-  statusCode: 'PAID' | 'CLOSED' | 'OPEN';
+  status: 'OPEN' | 'PAID' | 'CLOSED';
+  entriesCount: number;
 };
 
 export function cardToDto(card: Card): CardDto {

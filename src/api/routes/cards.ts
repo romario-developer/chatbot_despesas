@@ -54,6 +54,54 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
+function clampDay(value: number): number {
+  if (!Number.isInteger(value)) {
+    return 1;
+  }
+  return Math.min(Math.max(value, 1), 31);
+}
+
+type DayjsCycleRange = {
+  start: dayjs.Dayjs;
+  end: dayjs.Dayjs;
+};
+
+function buildMonthClosingDate(base: dayjs.Dayjs, closingDay: number) {
+  const monthDays = base.endOf('month').date();
+  const day = Math.min(clampDay(closingDay), monthDays);
+  return base.date(day).endOf('day');
+}
+
+function buildCycleForClosingMonth(month: string, closingDay: number): DayjsCycleRange {
+  const currentMonth = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ);
+  const previousMonth = currentMonth.subtract(1, 'month');
+  const currentClosing = buildMonthClosingDate(currentMonth, closingDay);
+  const previousClosing = buildMonthClosingDate(previousMonth, closingDay);
+  const start = previousClosing.add(1, 'millisecond').startOf('day');
+  return { start, end: currentClosing };
+}
+
+function buildCycleFromReference(reference: dayjs.Dayjs, closingDay: number): DayjsCycleRange {
+  const cycle = getCardCycleRange(reference.toDate(), closingDay);
+  return {
+    start: dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day'),
+    end: dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day'),
+  };
+}
+
+// dueDay < closingDay typically moves the due date to the month after closing, otherwise stays in the closing month.
+function resolveDueDate(cycleEnd: dayjs.Dayjs, dueDay: number, closingDay: number): dayjs.Dayjs {
+  const normalizedDue = clampDay(dueDay);
+  const normalizedClosing = clampDay(closingDay);
+  let candidate = cycleEnd.clone();
+  if (normalizedDue < normalizedClosing) {
+    candidate = candidate.add(1, 'month');
+  }
+  const monthDays = candidate.endOf('month').date();
+  const day = Math.min(normalizedDue, monthDays);
+  return candidate.date(day).startOf('day');
+}
+
 
 router.get('/summary', async (req: AuthedRequest, res) => {
   const userId = req.user?.id;
@@ -85,9 +133,10 @@ router.get('/summary', async (req: AuthedRequest, res) => {
 });
 
 // GET /api/cards/invoices?month=YYYY-MM|asOf=YYYY-MM-DD
-// Retorna InvoiceViewDTO (card completo, ciclo, totais e status). Exemplo:
+// Retorna faturas calculadas pelo mês de fechamento (cycleEnd). Exemplo de resposta:
 // {
 //   "asOf": "2026-01-31",
+//   "month": "2026-02",
 //   "invoices": [
 //     {
 //       "card": {
@@ -104,19 +153,14 @@ router.get('/summary', async (req: AuthedRequest, res) => {
 //         "updatedAt": "2026-01-12T16:00:00.000Z"
 //       },
 //       "cardId": 1,
-//       "name": "Visa Corporativo",
-//       "brand": "VISA",
-//       "limit": 5000,
-//       "closingDay": 5,
-//       "dueDay": 20,
-//       "cycleStart": "2026-01-06",
-//       "cycleEnd": "2026-02-05",
-//       "invoiceTotal": 1200,
+//       "cycleStart": "2026-01-05T00:00:00.000Z",
+//       "cycleEnd": "2026-02-04T23:59:59.999Z",
+//       "dueDate": "2026-02-20T00:00:00.000Z",
 //       "entriesCount": 4,
+//       "invoiceTotal": 1200,
 //       "paidTotal": 600,
 //       "remaining": 600,
-//       "status": "ABERTA",
-//       "statusCode": "OPEN"
+//       "status": "OPEN"
 //     }
 //   ]
 // }
@@ -186,19 +230,22 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   }
 
   const invoices = await Promise.all(
-    cards.map(async (card, index): Promise<InvoiceViewDto & { entriesCount: number }> => {
+    cards.map(async (card, index): Promise<InvoiceViewDto> => {
       const dto = cardDtos[index];
-      const cycle = getCardCycleRange(asOf.toDate(), card.closingDay);
-      const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
-      const cycleEndDay = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day');
-      const cycleEndStart = cycleEndDay.startOf('day');
+      const cycleRange = parsedMonth
+        ? buildCycleForClosingMonth(parsedMonth, card.closingDay)
+        : buildCycleFromReference(asOf, card.closingDay);
+      const cycleStart = cycleRange.start;
+      const cycleEnd = cycleRange.end;
+      const cycleEndStart = cycleEnd.startOf('day');
+      const dueDate = resolveDueDate(cycleEnd, card.dueDay, card.closingDay);
 
       const expenseTotals = await prisma.expense.aggregate({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycleStart.toDate(), lte: cycleEndDay.toDate() },
+          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
         },
         _sum: { amountCents: true },
         _count: { _all: true },
@@ -212,26 +259,20 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
       const paidTotal = centsToNumber(paymentCents);
       const remaining = centsToNumber(remainingCents);
 
-      const status =
-        invoiceTotal > 0 && remaining === 0
-          ? 'PAGA'
-          : asOf.isAfter(cycleEndDay)
-          ? 'FECHADA'
-          : 'ABERTA';
-      const statusCode = remaining === 0 ? 'PAID' : asOf.isAfter(cycleEndDay) ? 'CLOSED' : 'OPEN';
+      const status = remaining > 0 ? 'OPEN' : 'PAID';
 
       return {
         cardId: card.id,
         ...dto,
         card: dto,
-        cycleStart: cycle.startDate,
-        cycleEnd: cycle.endDate,
-        invoiceTotal,
+        cycleStart: cycleStart.toISOString(),
+        cycleEnd: cycleEnd.toISOString(),
+        dueDate: dueDate.toISOString(),
         entriesCount: expenseTotals._count._all ?? 0,
+        invoiceTotal,
         paidTotal,
         remaining,
         status,
-        statusCode,
       };
     }),
   );
