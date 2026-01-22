@@ -303,7 +303,7 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'cycleEnd obrigatorio. Use YYYY-MM-DD.' });
   }
 
-  const parsedCycleEnd = dayjs.tz(rawCycleEnd, 'YYYY-MM-DD', true, TZ);
+  const parsedCycleEnd = dayjs.tz(rawCycleEnd, 'YYYY-MM-DD', TZ);
   if (!parsedCycleEnd.isValid()) {
     return res.status(400).json({ error: 'cycleEnd invalido. Use YYYY-MM-DD.' });
   }
