@@ -6,7 +6,7 @@ import { ensureDefaultCategory, getOrCreateCategory } from "../../services/categ
 import { classifyCategoryByText, learnCategoryMemory } from "../../services/categoryClassifier";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";
 import { AuthedRequest } from "../middleware/auth";
-import { assertValidAmountCents, centsToNumber, toAmountCents } from "../../utils/money";
+import { assertValidAmountCents, centsToNumber, formatCurrencyNumber, toAmountCents } from "../../utils/money";
 import type { PaymentMethod } from "../../utils/paymentMethod";
 import { DEFAULT_PAYMENT_METHOD, normalizePaymentMethod } from "../../utils/paymentMethod";
 import {
@@ -15,6 +15,7 @@ import {
   findCardByIdForUser,
 } from "../../services/cardService";
 import { parseInstallmentPattern } from "../../domain/installmentPattern";
+import { createInstallmentExpenses } from "../../services/installmentService";
 
 const router = Router();
 const DEBUG_ENTRIES = process.env.DEBUG_ENTRIES === "1";
@@ -64,6 +65,34 @@ function mapExpense(expense: {
     createdAt: expense.createdAt,
     categorySource: expense.categorySource ?? "MANUAL",
   };
+}
+
+function buildInstallmentSummary(description: string, totalCents: number, installments: number) {
+  const totalAmount = centsToNumber(totalCents);
+  const installmentAmount = Number((totalAmount / installments).toFixed(2));
+  return `${description} — ${formatCurrencyNumber(totalAmount)} em ${installments}x (${formatCurrencyNumber(
+    installmentAmount,
+  )}/mês)`;
+}
+
+function buildSingleSummary(description: string, amountCents: number) {
+  return `${description} — ${formatCurrencyNumber(centsToNumber(amountCents))}`;
+}
+
+function parseInstallmentParam(value: unknown): number {
+  if (typeof value === "number") {
+    if (Number.isInteger(value) && value > 0) {
+      return value;
+    }
+    return 1;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 1;
 }
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -369,7 +398,12 @@ router.post("/", async (req: AuthedRequest, res) => {
     }
   }
 
-  const isCreditPayment = paymentMethod === "CREDIT";
+  const parcelInfo = parseInstallmentPattern(descriptionText);
+  const installments = parseInstallmentParam(req.body?.installments);
+  const finalPaymentMethod =
+    installments > 1 ? "CREDIT" : paymentMethod ?? DEFAULT_PAYMENT_METHOD;
+
+  const isCreditPayment = finalPaymentMethod === "CREDIT";
   const resolvedCardId = typeof cardCheck.cardId === "number" ? cardCheck.cardId : null;
   if (isCreditPayment && resolvedCardId === null) {
     return res
@@ -377,13 +411,44 @@ router.post("/", async (req: AuthedRequest, res) => {
       .json({ error: '"cardId" e obrigatorio para pagamento com paymentMethod=CREDIT' });
   }
 
-  const parcelInfo = parseInstallmentPattern(descriptionText);
+  if (installments > 1) {
+    const { groupId, expenses } = await createInstallmentExpenses({
+      userId: user.id,
+      cardId: resolvedCardId!,
+      categoryId,
+      description: descriptionText,
+      amountCents,
+      date: parsedDate,
+      rawText: descriptionText,
+      purchaseLabel: parcelInfo.purchaseLabel ?? descriptionText,
+      paymentMethod: "CREDIT",
+      source: "manual",
+      installmentsTotal: installments,
+      appendInstallmentLabel: true,
+    });
+
+    console.log("[entries] created installments", {
+      groupId,
+      userId: user.id,
+      amountCents,
+      installments,
+    });
+
+    return res.status(201).json({
+      createdCount: expenses.length,
+      installmentGroupId: groupId,
+      createdIds: expenses.map((expense) => expense.id),
+      summary: buildInstallmentSummary(descriptionText, amountCents, installments),
+      entries: expenses.map(mapExpense),
+    });
+  }
+
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
       categoryId,
       amountCents,
-      paymentMethod: paymentMethod ?? DEFAULT_PAYMENT_METHOD,
+      paymentMethod: finalPaymentMethod,
       ...(resolvedCardId !== null ? { cardId: resolvedCardId } : {}),
       description: descriptionText,
       date: parsedDate,
