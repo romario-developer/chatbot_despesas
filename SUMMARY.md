@@ -1,80 +1,40 @@
-# Resumo do Projeto (Bot de Despesas Telegram)
+# Resumo do Projeto (API do Chat Despesas)
 
-## Visao geral
-- Bot Telegram em Node.js + TypeScript com grammy.
-- Persistencia via Prisma + SQLite; timezone fixo America/Bahia.
-- Fluxo seguro: mensagens viram rascunhos (ExpenseDraft) e so salvam apos confirmacao.
-- Multiusuario por `telegram_id`; dados isolados por usuario; categorias dinamicas por usuario.
+## Visão geral
+- API em Node.js/TypeScript (Express + Prisma + Postgres) que serve exclusivamente o PWA do Chat Despesas.
+- Os dados ficam segregados por usuário autenticado via JWT; o backend expõe autenticação, lançamentos, planejamento e dashboards.
+- O Telegram saiu do fluxo; resta o consumo direto pela PWA e pelas rotas administrativas.
 
 ## Modelos principais
-- User: telegramId (unique), mustChangePassword.
-- Category: name, normalizedName, unique por usuario.
-- Expense: amountCents, description, date, categoryId, userId, source, rawText.
-- ExpenseDraft: rascunho antes de confirmar.
-- UserSession: estado de edicao ou confirmacoes especiais (ex.: apagar mes).
+- **User**: email, senha (hash), flags de mudança de senha; integra usuários internos e qualquer credencial manual.
+- **Category**: nome normalizado com constraint única por usuário.
+- **Expense**: amountCents, descrição, data, categoria, source (marca a origem do lançamento), cartões e parcelas.
+- **Card / Credit / Installments**: suporte a cartões com limite, pagamentos e grupos de parcelas.
+- **Planning / UserSession**: planejamento mensal e estado de interação para guiar fluxos do frontend.
 
 ## Auth e admin
-- mustChangePassword + endpoint de troca de senha.
-- Admin endpoint para criar usuarios.
-- Todas as consultas e mutacoes filtradas por usuario.
+- Login via `POST /api/auth/login` usando `ADMIN_PASSWORD`; o JWT expira em 7 dias e o middleware `authMiddleware` garante acesso às rotas protegidas.
+- Administradores usam `X-Admin-Token` para exportar CSV (`/api/admin/exports/expenses.csv`) e gerar backups.
 
-## Parser de despesas
-- Valor: detecta formatos 10 | 10,50 | 10.50 | R$ 10,50 -> amountCents.
-- Data: hoje, ontem, DD/MM, DD/MM/YYYY, YYYY-MM-DD (default hoje); normalizacao evita shift de timezone.
-- Categoria: "categoria X" -> inferencia por palavras-chave -> "Outros".
-- Descricao: texto restante; se vazio, "Sem descricao".
-- Retorna `confidence` (high/medium/low) e `issues` (missing_description, ambiguous_category).
+## Fluxo do PWA
+- O frontend chama `/api/entries` para listar, criar, editar e remover despesas.
+- `/api/categories` devolve todas as categorias do usuário.
+- `/api/summary` e `/api/dashboard` consolidam totais mensais, categoriais, cartões e metas.
+- `/api/cards`, `/api/credits`, `/api/planning`, `/api/reports`, `/api/quick-entry` e `/api/assistant` complementam o histórico, pagamentos e o assistente de entrada rápida.
+- `/api/me` devolve dados do usuário logado para o painel de perfil.
 
-## UX de captura
-- Mensagem texto -> cria ExpenseDraft, mostra resumo + teclas inline (Confirmar / Editar / Cancelar).
-- Se confidence low, sugere edicao.
-- Edicao guiada por botoes (valor, categoria, descricao, data); session controla o campo em edicao.
+## Relatórios e exportações
+- `/api/reports` agrega métricas adicionais; `/api/admin/exports/expenses.csv` gera CSVs filtrados por mês, categoria e fonte.
+- Resumo mensal e relatórios continuam em sincronia com o planner do PWA.
 
-## Menu fixo (Reply Keyboard)
-- Botoes:
-  - Relatorio (mes) -> /relatorio mes
-  - Despesas (lista) -> /despesas mes (paginado)
-  - Registrar -> lembrete para enviar texto livre (cria rascunho)
-  - Categorias -> /categorias
-  - Limpar tela -> apaga ~25 mensagens recentes do bot (nao dados) e confirma
-  - Ajuda -> /ajuda
-- /menu ativa; /ocultar_menu esconde.
+## Scripts de manutenção
+- `npm run db:backup` / `db:backup:render`: gera JSON completo com usuários, categorias, despesas, rascunhos e sessões.
+- `npm run db:restore`: restaura esse JSON em um banco vazio.
+- `npm run db:reset`: limpa dados transacionais (despesas, rascunhos, planejamento, sessões) exigindo `RESET_CONFIRM=YES`.
+- Outras migrations (`migrateUserData*`) suportam limpeza ou consolidação de dados herdados.
 
-## Comandos principais
-- /start: boas-vindas + menu.
-- /ajuda: instrucoes + exemplos.
-- /categorias: lista categorias do usuario.
-- /relatorio [mes|MM/AAAA]: resumo mensal HTML (cabecalho + categorias com %).
-- /despesas [mes|MM/AAAA]: lista paginada (10/pg) com inline prev/next.
-- /editar ID campo valor: campos valor/descricao/categoria/data.
-- /remover ID: remove despesa do usuario.
-- /limpar_despesas MM/AAAA: confirmacao em 2 etapas ("APAGAR MM/AAAA"), apaga despesas do mes do usuario.
-- /limpar ou botao "Limpar tela": remove ultimas mensagens do bot no chat (nao mexe no banco).
-
-## Relatorio (/relatorio)
-- HTML parse_mode.
-- Cabecalho: titulo MM/AAAA, periodo (inicio-fim), lancamentos, total.
-- Secao Categorias (uma por bloco, com linha em branco): `Nome - R$ valor (X%)`.
-- Nao lista despesas no /relatorio (apenas resumo).
-
-## Paginacao (/despesas)
-- Comando dedicado; callback data `exp:list:YYYY-MM:page`.
-- Cabecalho + meta + total do mes; itens em duas linhas; descricoes truncadas.
-
-## Exportacao CSV
-- Exportacao CSV oficial mantida; endpoints debug/compare removidos.
-
-## Outros ajustes recentes
-- CORS permite novo origin da PWA.
-- Cache-Control e Pragma adicionados.
-- Fix build: permite categoryId em updateMany.
-- Summary inclui todas as sources; lista PWA mostra todas por padrao.
-- Migracao de dados de users antigos para admin.
-
-## Execucao
-- Polling por padrao; webhook opcional via env.
-- Scripts: dev (tsx watch), build (tsc), start (dist), prisma:migrate/generate/studio.
-
-## Proximas ideias (mencionadas)
-- Paginacao "ver mais" no relatorio ou exportacao CSV.
-- Audio/Whisper, webhook em prod, versao WhatsApp (futuro).
+## Execução
+- Desenvolvimento: `npm run dev`
+- Build: `npm run build`
+- Start (produ‍ção): `npm run build && npm start`
+- Prisma: `npm run prisma:migrate`, `prisma:migrate:deploy`, `prisma:studio`

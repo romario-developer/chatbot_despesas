@@ -24,7 +24,7 @@ export async function createExpense(userId: number, input: ParsedExpenseInput) {
       description: input.description || 'Sem descrição',
       date: input.date,
       rawText: input.rawText,
-      source: 'telegram-text',
+      source: 'api',
     },
   });
 

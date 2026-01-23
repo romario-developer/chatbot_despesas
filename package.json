@@ -40,7 +40,6 @@
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "grammy": "^1.38.4",
     "jsonwebtoken": "^9.0.3",
     "openai": "^6.16.0",
     "zod": "^4.3.5"

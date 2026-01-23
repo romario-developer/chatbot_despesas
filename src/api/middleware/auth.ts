@@ -2,7 +2,6 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
 
 import { getOrCreateUser } from '../../services/userService';
-import { API_TELEGRAM_ID } from '../../utils/systemUsers';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -37,8 +36,8 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const telegramId = sub === 'admin' ? API_TELEGRAM_ID : sub;
-    const user = await getOrCreateUser(telegramId);
+    const userIdentifier = sub;
+    const user = await getOrCreateUser(userIdentifier);
     if (!user || !Number.isInteger(user.id) || user.id <= 0) {
       return res.status(401).json({ error: 'Unauthorized' });
     }

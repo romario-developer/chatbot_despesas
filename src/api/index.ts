@@ -16,7 +16,6 @@ import planningRoutes from './routes/planning';
 import quickEntryRoutes from './routes/quickEntry';
 import reportsRoutes from './routes/reports';
 import summaryRoutes from './routes/summary';
-import telegramRoutes from './routes/telegram';
 
 export const API_BASE_PATH = '/api';
 const router = Router();
@@ -27,7 +26,6 @@ router.get('/health', (_req, res) => {
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
-router.use('/telegram', telegramRoutes);
 
 router.use(authMiddleware);
 router.use('/assistant', assistantRoutes);
