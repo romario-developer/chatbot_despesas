@@ -207,7 +207,7 @@ router.post('/', async (req: AuthedRequest, res) => {
     installmentsTotal > 1 && parsed.paymentMethod === 'CREDIT' && matchedCard;
 
   if (shouldInstall) {
-    const { groupId, expenses } = await createInstallmentExpenses({
+    const { groupId, expenses, amounts } = await createInstallmentExpenses({
       userId: user.id,
       cardId: matchedCard!.id,
       categoryId: category.id,
@@ -227,11 +227,16 @@ router.post('/', async (req: AuthedRequest, res) => {
       `[quick-entry] userId=${user.id} amountCents=${amountCents} installments=${installmentsTotal}`,
     );
 
+    const perInstallmentAmount =
+      amounts.length > 0 ? centsToNumber(amounts[0]) : centsToNumber(amountCents / installmentsTotal);
     return res.status(201).json({
       created,
       installmentGroupId: groupId,
       totalAmount: centsToNumber(amountCents),
       installmentsTotal,
+      installments: installmentsTotal,
+      perInstallmentAmount,
+      firstDate: created[0].date,
       summary: buildInstallmentSummary(parsed.description, amountCents, installmentsTotal),
       categoryInferred,
       categoryConfidence,

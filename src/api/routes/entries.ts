@@ -101,9 +101,15 @@ type DateRangeValidationResult =
   | { start: Date; end: Date; fromStr: string; toStr: string }
   | { detail: string };
 
+function ensureDateOnly(value: string) {
+  return value.includes("T") ? value.split("T")[0] : value;
+}
+
 function buildDateRange(fromValue: string, toValue: string): DateRangeValidationResult {
-  const fromStr = typeof fromValue === "string" ? fromValue.trim() : "";
-  const toStr = typeof toValue === "string" ? toValue.trim() : "";
+  const fromStrRaw = typeof fromValue === "string" ? fromValue.trim() : "";
+  const toStrRaw = typeof toValue === "string" ? toValue.trim() : "";
+  const fromStr = ensureDateOnly(fromStrRaw);
+  const toStr = ensureDateOnly(toStrRaw);
 
   if (!fromStr || !toStr) {
     return { detail: "Parâmetros de data são obrigatórios" };

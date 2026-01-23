@@ -26,6 +26,12 @@ function buildInstallmentDate(base: ReturnType<typeof dayjs>, offset: number) {
   return candidate.date(desired).startOf('day');
 }
 
+export interface CreateInstallmentResult {
+  groupId: string;
+  expenses: Awaited<ReturnType<typeof prisma.expense.create>>[];
+  amounts: number[];
+}
+
 export async function createInstallmentExpenses(options: CreateInstallmentOptions) {
   const {
     userId,
@@ -87,5 +93,5 @@ export async function createInstallmentExpenses(options: CreateInstallmentOption
     }),
   );
 
-  return { groupId: group.id, expenses };
+  return { groupId: group.id, expenses, amounts };
 }
