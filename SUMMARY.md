@@ -38,3 +38,8 @@
 - Build: `npm run build`
 - Start (produ‍ção): `npm run build && npm start`
 - Prisma: `npm run prisma:migrate`, `prisma:migrate:deploy`, `prisma:studio`
+
+## Observação
+- Arquivo atualizado temporariamente para registrar alteração e permitir o push solicitado.
+
+
