@@ -16,7 +16,27 @@ import { normalizeCategoryName } from '../../utils/normalize';
 import { inferCategory } from '../../domain/categorizer';
 import { DEFAULT_PAYMENT_METHOD } from '../../utils/paymentMethod';
 import { CARD_SELECT, CardSummary, findCardByNameGuess } from '../../services/cardService';
+import { createInstallmentExpenses } from '../../services/installmentService';
 import type { AuthedRequest } from '../middleware/auth';
+
+const CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatAmount(value: number) {
+  return CURRENCY_FORMATTER.format(value);
+}
+
+function buildInstallmentSummary(description: string, totalCents: number, installments: number) {
+  const totalString = formatAmount(centsToNumber(totalCents));
+  const monthlyString = formatAmount((totalCents / installments) / 100);
+  return `${description} — ${totalString} em ${installments}x (${monthlyString}/mês)`;
+}
+
+function buildSingleSummary(description: string, amountCents: number) {
+  return `${description} — ${formatAmount(centsToNumber(amountCents))}`;
+}
 
 const router = Router();
 
@@ -187,59 +207,32 @@ router.post('/', async (req: AuthedRequest, res) => {
     installmentsTotal > 1 && parsed.paymentMethod === 'CREDIT' && matchedCard;
 
   if (shouldInstall) {
-    const group = await prisma.installmentGroup.create({
-      data: {
-        userId: user.id,
-        cardId: matchedCard!.id,
-        descriptionBase: parsed.description || 'Sem descricao',
-        totalAmountCents: amountCents,
-        installmentsTotal,
-      },
+    const { groupId, expenses } = await createInstallmentExpenses({
+      userId: user.id,
+      cardId: matchedCard!.id,
+      categoryId: category.id,
+      description: parsed.description || 'Sem descricao',
+      amountCents,
+      date: parsed.date,
+      rawText: parsed.rawText,
+      purchaseLabel: parsed.purchaseLabel ?? parsed.description,
+      paymentMethod: 'CREDIT',
+      source: 'pwa-quick',
+      installmentsTotal,
+      appendInstallmentLabel: true,
     });
-    const baseDate = dayjs(parsed.date).tz(TZ);
-    const baseAmount = Math.floor(amountCents / installmentsTotal);
-    const remainder = amountCents - baseAmount * installmentsTotal;
-    const installmentAmounts = Array.from({ length: installmentsTotal }, (_, index) =>
-      index === installmentsTotal - 1 ? baseAmount + remainder : baseAmount,
-    );
 
-    const created = await Promise.all(
-      installmentAmounts.map(async (installmentAmount, index) => {
-        const installmentDate = buildInstallmentDate(baseDate, index);
-          const entry = await prisma.expense.create({
-            data: {
-              userId: user.id,
-              categoryId: category.id,
-              amountCents: installmentAmount,
-              paymentMethod: 'CREDIT',
-              cardId: matchedCard!.id,
-              description: `${parsed.description} (${index + 1}/${installmentsTotal})`,
-              date: installmentDate.toDate(),
-              source: 'pwa-quick',
-              rawText: parsed.rawText,
-              installmentGroupId: group.id,
-              installmentIndex: index + 1,
-              installmentsTotal,
-              installmentCurrent: index + 1,
-              installmentTotal: installmentsTotal,
-              purchaseLabel: parsed.purchaseLabel ?? parsed.description,
-              postedMonth: installmentDate.format('YYYY-MM'),
-            },
-            include: { category: true, card: { select: CARD_SELECT } },
-          });
-        return mapExpense(entry);
-      }),
-    );
-
+    const created = expenses.map(mapExpense);
     console.info(
       `[quick-entry] userId=${user.id} amountCents=${amountCents} installments=${installmentsTotal}`,
     );
 
     return res.status(201).json({
       created,
-      installmentGroupId: group.id,
+      installmentGroupId: groupId,
       totalAmount: centsToNumber(amountCents),
       installmentsTotal,
+      summary: buildInstallmentSummary(parsed.description, amountCents, installmentsTotal),
       categoryInferred,
       categoryConfidence,
       parsed: {
@@ -279,6 +272,7 @@ router.post('/', async (req: AuthedRequest, res) => {
   return res.status(201).json({
     ...entry,
     entry,
+    summary: buildSingleSummary(parsed.description, amountCents),
     categoryInferred,
     categoryConfidence,
     parsed: {
