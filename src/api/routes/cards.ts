@@ -9,7 +9,7 @@ import { Prisma } from '@prisma/client';
 import type { Expense, CardPayment } from '@prisma/client';
 import {
   getCardCycleForMonth,
-  getCurrentOpenCycle,
+  getOpenCycle,
   type CardCyclePeriod,
 } from '../../services/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
@@ -59,6 +59,8 @@ async function fetchCardPaymentsForCycle(userId: number, cardId: number, cycleEn
 
 function logInvoiceDebug(
   cardId: number,
+  closingDay: number,
+  asOf: string,
   cycle: CardCyclePeriod,
   purchases: Expense[],
   payments: CardPayment[],
@@ -68,20 +70,20 @@ function logInvoiceDebug(
 ) {
   if (!DEBUG_INVOICES) return;
   console.log(
-    '[cards/invoices] debug cardId=%s cycleStart=%s cycleEnd=%s',
+    '[cards/invoices] debug cardId=%s closingDay=%s asOf=%s cycleStart=%s cycleEnd=%s',
     cardId,
+    closingDay,
+    asOf,
     cycle.cycleStart.format('YYYY-MM-DD'),
     cycle.cycleEnd.format('YYYY-MM-DD'),
   );
   console.log(
-    '[cards/invoices] purchases %o',
+    '[cards/invoices] entries used %o',
     purchases.map((purchase) => ({
       id: purchase.id,
-      description: purchase.description,
-      amount: purchase.amountCents,
       date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
-      paymentMethod: purchase.paymentMethod,
-      cardId: purchase.cardId,
+      amount: purchase.amountCents,
+      description: purchase.description,
     })),
   );
   console.log('[cards/invoices] invoiceTotal=%s', centsToNumber(invoiceTotalCents));
@@ -247,30 +249,42 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   const invoices = await Promise.all(
     cards.map(async (card, index): Promise<InvoiceViewDto> => {
       const dto = cardDtos[index];
-      const cycle =
-        parsedMonth && parsedMonth
-          ? getCardCycleForMonth(card, parsedMonth)
-          : getCurrentOpenCycle(card, asOf.toDate());
-      const purchases = await prisma.expense.findMany({
-        where: {
-          userId,
-          cardId: card.id,
-          paymentMethod: 'CREDIT',
-          date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
-        },
-        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      });
-      const payments = await fetchCardPaymentsForCycle(
+    const cycle =
+      parsedMonth && parsedMonth
+        ? getCardCycleForMonth(card, parsedMonth)
+        : getOpenCycle(card, asOf.toDate());
+    const rangeStart = cycle.cycleStart.startOf('day');
+    const rangeEnd = cycle.cycleEnd.endOf('day');
+    const purchases = await prisma.expense.findMany({
+      where: {
         userId,
-        card.id,
-        cycle.cycleEnd.startOf('day').toDate(),
-      );
+        cardId: card.id,
+        paymentMethod: 'CREDIT',
+        date: { gte: rangeStart.toDate(), lte: rangeEnd.toDate() },
+      },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    });
+    const payments = await fetchCardPaymentsForCycle(
+      userId,
+      card.id,
+      cycle.cycleEnd.startOf('day').toDate(),
+    );
 
       const invoiceTotalCents = purchases.reduce((sum, purchase) => sum + purchase.amountCents, 0);
       const paidTotalCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
       const remainingCents = Math.max(0, invoiceTotalCents - paidTotalCents);
 
-      logInvoiceDebug(card.id, cycle, purchases, payments, invoiceTotalCents, paidTotalCents, remainingCents);
+      logInvoiceDebug(
+        card.id,
+        card.closingDay,
+        asOf.format('YYYY-MM-DD'),
+        cycle,
+        purchases,
+        payments,
+        invoiceTotalCents,
+        paidTotalCents,
+        remainingCents,
+      );
 
       const status =
         invoiceTotalCents === 0
@@ -317,13 +331,15 @@ router.get('/invoices/open', async (req: AuthedRequest, res) => {
   const invoices = await Promise.all(
     cards.map(async (card) => {
       const dto = cardToDto(card);
-      const cycle = getCurrentOpenCycle(card, reference.toDate());
+      const cycle = getOpenCycle(card, reference.toDate());
+      const rangeStart = cycle.cycleStart.startOf('day');
+      const rangeEnd = cycle.cycleEnd.endOf('day');
       const purchases = await prisma.expense.findMany({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
+          date: { gte: rangeStart.toDate(), lte: rangeEnd.toDate() },
         },
         orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       });
@@ -337,7 +353,17 @@ router.get('/invoices/open', async (req: AuthedRequest, res) => {
       const paidTotalCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
       const remainingCents = Math.max(0, invoiceTotalCents - paidTotalCents);
 
-      logInvoiceDebug(card.id, cycle, purchases, payments, invoiceTotalCents, paidTotalCents, remainingCents);
+      logInvoiceDebug(
+        card.id,
+        card.closingDay,
+        reference.format('YYYY-MM-DD'),
+        cycle,
+        purchases,
+        payments,
+        invoiceTotalCents,
+        paidTotalCents,
+        remainingCents,
+      );
 
       const status =
         invoiceTotalCents === 0
@@ -637,7 +663,7 @@ router.post('/payments', async (req: AuthedRequest, res) => {
   }
   const resolvedDate = parsedPaidAt.startOf('day');
 
-  const cycle = getCurrentOpenCycle(card, resolvedDate.toDate());
+  const cycle = getOpenCycle(card, resolvedDate.toDate());
   const cycleStart = cycle.cycleStart.startOf('day');
   const cycleEnd = cycle.cycleEnd.startOf('day');
 
