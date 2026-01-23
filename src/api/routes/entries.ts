@@ -17,6 +17,7 @@ import {
 import { parseInstallmentPattern } from "../../domain/installmentPattern";
 
 const router = Router();
+const DEBUG_ENTRIES = process.env.DEBUG_ENTRIES === "1";
 
 function parseDateOnly(dateStr: unknown): Date | null {
   if (typeof dateStr !== "string") return null;
@@ -262,6 +263,24 @@ router.get("/", async (req: AuthedRequest, res) => {
       include: { category: true, card: { select: CARD_SELECT } },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     });
+
+    if (DEBUG_ENTRIES) {
+      console.log(
+        "[entries][debug] items",
+        expenses.map((expense) => ({
+          id: expense.id,
+          description: expense.description,
+          amount: centsToNumber(expense.amountCents),
+          date: expense.date.toISOString(),
+          createdAt: expense.createdAt,
+          deletedAt: null,
+          status: null,
+          paymentMethod: expense.paymentMethod,
+          cardId: expense.cardId ?? null,
+          userId: expense.userId,
+        })),
+      );
+    }
 
     const items = expenses.map(mapExpense);
     console.log("[entries] ok", { from: fromStr, to: toStr, count: items.length });

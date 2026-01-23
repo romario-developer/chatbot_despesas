@@ -84,6 +84,8 @@ function logInvoiceDebug(
     amount: purchase.amountCents,
     description: purchase.description,
     createdAt: purchase.createdAt,
+    deletedAt: null,
+    status: null,
   }));
   console.log('[cards/invoices] entries count=%s details=%o', entriesCount, entryPayload);
   console.log('[cards/invoices] invoiceTotal=%s', centsToNumber(invoiceTotalCents));
