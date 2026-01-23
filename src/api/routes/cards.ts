@@ -20,6 +20,18 @@ const DEBUG_INVOICES = process.env.DEBUG_INVOICES === '1';
 const BRAND_VALUES = new Set(['VISA', 'MASTERCARD', 'ELO', 'AMEX', 'OTHER']);
 const DEFAULT_CARD_COLOR = '#4F46E5';
 
+function normalizeQueryParam(value: unknown): string | string[] | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const strings = value.filter((item): item is string => typeof item === 'string');
+    if (!strings.length) return undefined;
+    return strings.length === 1 ? strings[0] : strings;
+  }
+  return undefined;
+}
+
 async function fetchCardPaymentsForCycle(userId: number, cardId: number, cycleEndStart: Date) {
   try {
     return await prisma.cardPayment.findMany({
@@ -530,7 +542,10 @@ router.get('/:cardId/purchases', async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: 'Cartao nao encontrado' });
   }
 
-  const range = parseFromToQuery(req.query.from, req.query.to);
+  const range = parseFromToQuery(
+    normalizeQueryParam(req.query.from),
+    normalizeQueryParam(req.query.to),
+  );
   if (range.error) {
     return res.status(400).json({ error: range.error });
   }
@@ -599,7 +614,7 @@ router.post('/payments', async (req: AuthedRequest, res) => {
 
   const card = await prisma.card.findFirst({
     where: { id: parsedCardId, userId },
-    select: { id: true, closingDay: true },
+    select: { id: true, closingDay: true, dueDay: true },
   });
   if (!card) {
     return res.status(404).json({ error: 'Cartao nao encontrado' });

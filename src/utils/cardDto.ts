@@ -25,7 +25,7 @@ export type InvoiceViewDto = {
   invoiceTotal: number;
   paidTotal: number;
   remaining: number;
-  status: 'OPEN' | 'PAID' | 'CLOSED';
+  status: 'OPEN' | 'PAID' | 'CLOSED' | 'EMPTY';
   entriesCount: number;
 };
 
