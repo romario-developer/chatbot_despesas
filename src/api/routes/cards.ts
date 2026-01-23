@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../../db/prisma';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
+import { parseFromToQuery } from '../../utils/dateRange';
 import { cardToDto, InvoiceViewDto, logCardDebug } from '../../utils/cardDto';
 import { Prisma } from '@prisma/client';
 import { getCardCycleRange } from '../../domain/cardCycle';
@@ -496,6 +497,76 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
     status: remainingCents > 0 ? 'OPEN' : 'PAID',
     purchases: purchasesList,
     purchasesCount,
+  });
+});
+
+router.get('/:cardId/purchases', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const parsedCardId =
+    typeof req.params.cardId === 'string' ? Number.parseInt(req.params.cardId.trim(), 10) : NaN;
+  if (!Number.isInteger(parsedCardId) || parsedCardId <= 0) {
+    return res.status(400).json({ error: 'cardId invalido' });
+  }
+
+  const card = await prisma.card.findFirst({
+    where: { id: parsedCardId, userId },
+    select: { id: true },
+  });
+  if (!card) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const range = parseFromToQuery(req.query.from, req.query.to);
+  if (range.error) {
+    return res.status(400).json({ error: range.error });
+  }
+  if (!range.start || !range.endExclusive) {
+    return res
+      .status(400)
+      .json({ error: '"from" e "to" obrigatorios. Use YYYY-MM-DD.' });
+  }
+
+  const purchases = await prisma.expense.findMany({
+    where: {
+      userId,
+      cardId: parsedCardId,
+      paymentMethod: 'CREDIT',
+      date: { gte: range.start, lt: range.endExclusive },
+    },
+    include: { category: true },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+  });
+
+  const formattedFrom = dayjs(range.start).tz(TZ).format('YYYY-MM-DD');
+  const formattedTo = dayjs(range.endExclusive).tz(TZ).subtract(1, 'day').format('YYYY-MM-DD');
+  const purchasesDto = purchases.map((purchase) => {
+    const hasInstallments =
+      purchase.installmentCurrent !== null && purchase.installmentTotal !== null;
+    const installmentLabel = hasInstallments
+      ? `${purchase.installmentCurrent}/${purchase.installmentTotal}`
+      : null;
+    return {
+      id: purchase.id,
+      description: purchase.description,
+      amount: centsToNumber(purchase.amountCents),
+      date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
+      category: purchase.category?.name ?? null,
+      installmentCurrent: purchase.installmentCurrent ?? null,
+      installmentTotal: purchase.installmentTotal ?? null,
+      installmentLabel,
+      createdAt: purchase.createdAt,
+    };
+  });
+
+  return res.json({
+    cardId: parsedCardId,
+    from: formattedFrom,
+    to: formattedTo,
+    purchases: purchasesDto,
   });
 });
 
