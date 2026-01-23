@@ -6,14 +6,87 @@ import { centsToNumber, toAmountCents } from '../../utils/money';
 import { parseFromToQuery } from '../../utils/dateRange';
 import { cardToDto, InvoiceViewDto, logCardDebug } from '../../utils/cardDto';
 import { Prisma } from '@prisma/client';
-import { getCardCycleRange } from '../../domain/cardCycle';
+import type { Expense, CardPayment } from '@prisma/client';
+import {
+  getCardCycleForMonth,
+  getCurrentOpenCycle,
+  type CardCyclePeriod,
+} from '../../services/cardCycle';
 import type { AuthedRequest } from '../middleware/auth';
-import type { Dayjs } from 'dayjs';
 
 const router = Router();
+const DEBUG_INVOICES = process.env.DEBUG_INVOICES === '1';
 
 const BRAND_VALUES = new Set(['VISA', 'MASTERCARD', 'ELO', 'AMEX', 'OTHER']);
 const DEFAULT_CARD_COLOR = '#4F46E5';
+
+async function fetchCardPaymentsForCycle(userId: number, cardId: number, cycleEndStart: Date) {
+  try {
+    return await prisma.cardPayment.findMany({
+      where: {
+        userId,
+        cardId,
+        cycleEnd: cycleEndStart,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.message.includes('CardPayment')
+    ) {
+      console.warn('[cards/invoices] cardPayment table missing, skipping payments', {
+        cardId,
+        error: err.message,
+      });
+      return [];
+    }
+    throw err;
+  }
+}
+
+function logInvoiceDebug(
+  cardId: number,
+  cycle: CardCyclePeriod,
+  purchases: Expense[],
+  payments: CardPayment[],
+  invoiceTotalCents: number,
+  paidTotalCents: number,
+  remainingCents: number,
+) {
+  if (!DEBUG_INVOICES) return;
+  console.log(
+    '[cards/invoices] debug cardId=%s cycleStart=%s cycleEnd=%s',
+    cardId,
+    cycle.cycleStart.format('YYYY-MM-DD'),
+    cycle.cycleEnd.format('YYYY-MM-DD'),
+  );
+  console.log(
+    '[cards/invoices] purchases %o',
+    purchases.map((purchase) => ({
+      id: purchase.id,
+      description: purchase.description,
+      amount: purchase.amountCents,
+      date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
+      paymentMethod: purchase.paymentMethod,
+      cardId: purchase.cardId,
+    })),
+  );
+  console.log('[cards/invoices] invoiceTotal=%s', centsToNumber(invoiceTotalCents));
+  console.log(
+    '[cards/invoices] payments %o',
+    payments.map((payment) => ({
+      id: payment.id,
+      amount: payment.amountCents,
+      cycleEnd: dayjs(payment.cycleEnd).tz(TZ).format('YYYY-MM-DD'),
+    })),
+  );
+  console.log(
+    '[cards/invoices] paidTotal=%s remaining=%s',
+    centsToNumber(paidTotalCents),
+    centsToNumber(remainingCents),
+  );
+}
 
 function normalizeBrand(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -54,79 +127,6 @@ function parseMonthParam(value: unknown): string | null {
   const normalized = value.trim();
   if (!/^\d{4}-\d{2}$/.test(normalized)) return null;
   return normalized;
-}
-
-function clampDay(value: number): number {
-  if (!Number.isInteger(value)) {
-    return 1;
-  }
-  return Math.min(Math.max(value, 1), 31);
-}
-
-type DayjsCycleRange = {
-  start: Dayjs;
-  end: Dayjs;
-};
-
-function buildMonthClosingDate(base: Dayjs, closingDay: number) {
-  const monthDays = base.endOf('month').date();
-  const day = Math.min(clampDay(closingDay), monthDays);
-  return base.date(day).endOf('day');
-}
-
-function buildCycleForClosingMonth(month: string, closingDay: number): DayjsCycleRange {
-  const currentMonth = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ);
-  const previousMonth = currentMonth.subtract(1, 'month');
-  const currentClosing = buildMonthClosingDate(currentMonth, closingDay);
-  const previousClosing = buildMonthClosingDate(previousMonth, closingDay);
-  const start = previousClosing.add(1, 'millisecond').startOf('day');
-  return { start, end: currentClosing };
-}
-
-function buildCycleFromReference(reference: Dayjs, closingDay: number): DayjsCycleRange {
-  const cycle = getCardCycleRange(reference.toDate(), closingDay);
-  return {
-    start: dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day'),
-    end: dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).endOf('day'),
-  };
-}
-
-// dueDay < closingDay typically moves the due date to the month after closing, otherwise stays in the closing month.
-function resolveDueDate(cycleEnd: Dayjs, dueDay: number, closingDay: number): Dayjs {
-  const normalizedDue = clampDay(dueDay);
-  const normalizedClosing = clampDay(closingDay);
-  let candidate = cycleEnd.clone();
-  if (normalizedDue < normalizedClosing) {
-    candidate = candidate.add(1, 'month');
-  }
-  const monthDays = candidate.endOf('month').date();
-  const day = Math.min(normalizedDue, monthDays);
-  return candidate.date(day).startOf('day');
-}
-
-async function sumCardPayments(userId: number, cardId: number, cycleEndStart: Date) {
-  try {
-    return await prisma.cardPayment.aggregate({
-      where: {
-        userId,
-        cardId,
-        cycleEnd: cycleEndStart,
-      },
-      _sum: { amountCents: true },
-    });
-  } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.message.includes('CardPayment')
-    ) {
-      console.warn('[cards/invoices] cardPayment table missing, skipping payments', {
-        cardId,
-        error: err.message,
-      });
-      return { _sum: { amountCents: 0 } };
-    }
-    throw err;
-  }
 }
 
 
@@ -235,46 +235,49 @@ router.get('/invoices', async (req: AuthedRequest, res) => {
   const invoices = await Promise.all(
     cards.map(async (card, index): Promise<InvoiceViewDto> => {
       const dto = cardDtos[index];
-      const cycleRange = parsedMonth
-        ? buildCycleForClosingMonth(parsedMonth, card.closingDay)
-        : buildCycleFromReference(asOf, card.closingDay);
-      const cycleStart = cycleRange.start;
-      const cycleEnd = cycleRange.end;
-      const cycleEndStart = cycleEnd.startOf('day');
-      const dueDate = resolveDueDate(cycleEnd, card.dueDay, card.closingDay);
-
-      const expenseTotals = await prisma.expense.aggregate({
+      const cycle =
+        parsedMonth && parsedMonth
+          ? getCardCycleForMonth(card, parsedMonth)
+          : getCurrentOpenCycle(card, asOf.toDate());
+      const purchases = await prisma.expense.findMany({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
+          date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
         },
-        _sum: { amountCents: true },
-        _count: { _all: true },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       });
+      const payments = await fetchCardPaymentsForCycle(
+        userId,
+        card.id,
+        cycle.cycleEnd.startOf('day').toDate(),
+      );
 
-      const paymentTotals = await sumCardPayments(userId, card.id, cycleEndStart.toDate());
-      const expenseCents = expenseTotals._sum.amountCents ?? 0;
-      const paymentCents = paymentTotals._sum.amountCents ?? 0;
-      const remainingCents = Math.max(0, expenseCents - paymentCents);
-      const invoiceTotal = centsToNumber(expenseCents);
-      const paidTotal = centsToNumber(paymentCents);
-      const remaining = centsToNumber(remainingCents);
+      const invoiceTotalCents = purchases.reduce((sum, purchase) => sum + purchase.amountCents, 0);
+      const paidTotalCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const remainingCents = Math.max(0, invoiceTotalCents - paidTotalCents);
 
-      const status = remaining > 0 ? 'OPEN' : 'PAID';
+      logInvoiceDebug(card.id, cycle, purchases, payments, invoiceTotalCents, paidTotalCents, remainingCents);
+
+      const status =
+        invoiceTotalCents === 0
+          ? 'EMPTY'
+          : remainingCents <= 0
+            ? 'PAID'
+            : 'OPEN';
 
       return {
         cardId: card.id,
         ...dto,
         card: dto,
-        cycleStart: cycleStart.toISOString(),
-        cycleEnd: cycleEnd.toISOString(),
-        dueDate: dueDate.toISOString(),
-        entriesCount: expenseTotals._count._all ?? 0,
-        invoiceTotal,
-        paidTotal,
-        remaining,
+        cycleStart: cycle.cycleStart.toISOString(),
+        cycleEnd: cycle.cycleEnd.toISOString(),
+        dueDate: cycle.dueDate.toISOString(),
+        entriesCount: purchases.length,
+        invoiceTotal: centsToNumber(invoiceTotalCents),
+        paidTotal: centsToNumber(paidTotalCents),
+        remaining: centsToNumber(remainingCents),
         status,
       };
     }),
@@ -302,39 +305,43 @@ router.get('/invoices/open', async (req: AuthedRequest, res) => {
   const invoices = await Promise.all(
     cards.map(async (card) => {
       const dto = cardToDto(card);
-      const cycleRange = buildCycleFromReference(reference, card.closingDay);
-      const cycleStart = cycleRange.start;
-      const cycleEnd = cycleRange.end;
-      const cycleEndStart = cycleEnd.clone().startOf('day');
-
-      const expenseTotals = await prisma.expense.aggregate({
+      const cycle = getCurrentOpenCycle(card, reference.toDate());
+      const purchases = await prisma.expense.findMany({
         where: {
           userId,
           cardId: card.id,
           paymentMethod: 'CREDIT',
-          date: { gte: cycleStart.toDate(), lte: cycleEnd.toDate() },
+          date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
         },
-        _sum: { amountCents: true },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       });
-
-      const paymentTotals = await sumCardPayments(
+      const payments = await fetchCardPaymentsForCycle(
         userId,
         card.id,
-        cycleEndStart.toDate(),
+        cycle.cycleEnd.startOf('day').toDate(),
       );
 
-      const expenseCents = expenseTotals._sum.amountCents ?? 0;
-      const paymentCents = paymentTotals._sum.amountCents ?? 0;
-      const remainingCents = Math.max(0, expenseCents - paymentCents);
+      const invoiceTotalCents = purchases.reduce((sum, purchase) => sum + purchase.amountCents, 0);
+      const paidTotalCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const remainingCents = Math.max(0, invoiceTotalCents - paidTotalCents);
+
+      logInvoiceDebug(card.id, cycle, purchases, payments, invoiceTotalCents, paidTotalCents, remainingCents);
+
+      const status =
+        invoiceTotalCents === 0
+          ? 'EMPTY'
+          : remainingCents <= 0
+            ? 'PAID'
+            : 'OPEN';
 
       return {
         card: dto,
-        cycleStart: cycleStart.toISOString(),
-        cycleEnd: cycleEnd.toISOString(),
-        invoiceTotal: centsToNumber(expenseCents),
-        paidTotal: centsToNumber(paymentCents),
+        cycleStart: cycle.cycleStart.toISOString(),
+        cycleEnd: cycle.cycleEnd.toISOString(),
+        invoiceTotal: centsToNumber(invoiceTotalCents),
+        paidTotal: centsToNumber(paidTotalCents),
         remaining: centsToNumber(remainingCents),
-        status: remainingCents > 0 ? 'OPEN' : 'PAID',
+        status,
       };
     }),
   );
@@ -372,18 +379,18 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
   }
 
   const cycleMonth = parsedCycleEnd.format('YYYY-MM');
-  const cycleRange = buildCycleForClosingMonth(cycleMonth, card.closingDay);
-  if (!cycleRange.end.isSame(parsedCycleEnd.endOf('day'))) {
+  const cycle = getCardCycleForMonth(card, cycleMonth);
+  if (!cycle.cycleEnd.isSame(parsedCycleEnd.endOf('day'))) {
     return res.status(400).json({ error: 'cycleEnd invalido para esse cartao' });
   }
 
-  const dueDate = resolveDueDate(cycleRange.end, card.dueDay, card.closingDay);
+  const dueDate = cycle.dueDate;
 
   const filters: Prisma.ExpenseWhereInput[] = [
     { userId },
     { cardId: card.id },
     { paymentMethod: 'CREDIT' },
-    { date: { gte: cycleRange.start.toDate(), lte: cycleRange.end.toDate() } },
+    { date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() } },
   ];
 
   const rawSearch = Array.isArray(req.query.search) ? req.query.search[0] : req.query.search;
@@ -439,14 +446,14 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
     }),
   ]);
 
-  const paymentTotals = await sumCardPayments(
+  const payments = await fetchCardPaymentsForCycle(
     userId,
     card.id,
-    cycleRange.end.startOf('day').toDate(),
+    cycle.cycleEnd.startOf('day').toDate(),
   );
 
   const expenseCents = expenseTotals._sum.amountCents ?? 0;
-  const paymentCents = paymentTotals._sum.amountCents ?? 0;
+  const paymentCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
   const remainingCents = Math.max(0, expenseCents - paymentCents);
 
   const purchasesList = purchases.map((purchase) => {
@@ -485,16 +492,19 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
     search || 'n/a',
   );
 
+  const status =
+    expenseCents === 0 ? 'EMPTY' : remainingCents <= 0 ? 'PAID' : 'OPEN';
+
   return res.json({
     card: cardToDto(card),
-    cycleStart: cycleRange.start.toISOString(),
-    cycleEnd: cycleRange.end.toISOString(),
-    closeDate: cycleRange.end.toISOString(),
+    cycleStart: cycle.cycleStart.toISOString(),
+    cycleEnd: cycle.cycleEnd.toISOString(),
+    closeDate: cycle.cycleEnd.toISOString(),
     dueDate: dueDate.toISOString(),
     invoiceTotal: centsToNumber(expenseCents),
     paidTotal: centsToNumber(paymentCents),
     remaining: centsToNumber(remainingCents),
-    status: remainingCents > 0 ? 'OPEN' : 'PAID',
+    status,
     purchases: purchasesList,
     purchasesCount,
   });
@@ -612,9 +622,9 @@ router.post('/payments', async (req: AuthedRequest, res) => {
   }
   const resolvedDate = parsedPaidAt.startOf('day');
 
-  const cycle = getCardCycleRange(resolvedDate.toDate(), card.closingDay);
-  const cycleStart = dayjs.tz(cycle.startDate, 'YYYY-MM-DD', TZ).startOf('day');
-  const cycleEnd = dayjs.tz(cycle.endDate, 'YYYY-MM-DD', TZ).startOf('day');
+  const cycle = getCurrentOpenCycle(card, resolvedDate.toDate());
+  const cycleStart = cycle.cycleStart.startOf('day');
+  const cycleEnd = cycle.cycleEnd.startOf('day');
 
   const payment = await prisma.cardPayment.create({
     data: {
@@ -642,7 +652,7 @@ router.post('/payments', async (req: AuthedRequest, res) => {
     paymentDate: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
     paidAt: dayjs(payment.paymentDate).tz(TZ).format('YYYY-MM-DD'),
     cycleEnd: dayjs(payment.cycleEnd).tz(TZ).format('YYYY-MM-DD'),
-    cycleStart: cycle.startDate,
+    cycleStart: cycle.cycleStart.format('YYYY-MM-DD'),
     createdAt: payment.createdAt,
   });
 });
