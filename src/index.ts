@@ -24,6 +24,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const app = express();
 const corsAllowedOrigins = new Set([
   "https://despesas-pwa.onrender.com",
+  "https://chatbot-despesas-pwa.onrender.com",
   "http://localhost:5173",
   "http://localhost:3000",
 ]);
