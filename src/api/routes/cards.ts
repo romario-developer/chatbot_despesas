@@ -77,15 +77,15 @@ function logInvoiceDebug(
     cycle.cycleStart.format('YYYY-MM-DD'),
     cycle.cycleEnd.format('YYYY-MM-DD'),
   );
-  console.log(
-    '[cards/invoices] entries used %o',
-    purchases.map((purchase) => ({
-      id: purchase.id,
-      date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
-      amount: purchase.amountCents,
-      description: purchase.description,
-    })),
-  );
+  const entriesCount = purchases.length;
+  const entryPayload = purchases.map((purchase) => ({
+    id: purchase.id,
+    date: dayjs(purchase.date).tz(TZ).format('YYYY-MM-DD'),
+    amount: purchase.amountCents,
+    description: purchase.description,
+    createdAt: purchase.createdAt,
+  }));
+  console.log('[cards/invoices] entries count=%s details=%o', entriesCount, entryPayload);
   console.log('[cards/invoices] invoiceTotal=%s', centsToNumber(invoiceTotalCents));
   console.log(
     '[cards/invoices] payments %o',
