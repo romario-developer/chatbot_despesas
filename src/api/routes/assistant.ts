@@ -37,6 +37,12 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 }
 
+function ensureArrays(target: any) {
+  target.cards = Array.isArray(target.cards) ? target.cards : [];
+  target.suggestedActions = Array.isArray(target.suggestedActions) ? target.suggestedActions : [];
+  return target;
+}
+
 router.post('/chat', async (req: AuthedRequest, res) => {
   const validation = chatSchema.safeParse(req.body ?? {});
   if (!validation.success) {
@@ -86,11 +92,11 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       ];
       responseBody.state.month = targetMonth;
       responseBody.state.pendingQuestion = 'none';
-      return res.status(200).json(responseBody);
+      return res.status(200).json(ensureArrays(responseBody));
     } catch (err: any) {
       const message = err instanceof Error ? err.message : 'Não foi possível interpretar o lançamento.';
       responseBody.assistantMessage = message;
-      return res.status(422).json(responseBody);
+      return res.status(422).json(ensureArrays(responseBody));
     }
   }
 
@@ -98,7 +104,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
     responseBody.assistantMessage =
       'Oi! Quer analisar saldo, gastos, cartões ou planejamento? Qual mês você quer ver?';
     responseBody.state.pendingQuestion = 'askMonth';
-    return res.status(200).json(responseBody);
+    return res.status(200).json(ensureArrays(responseBody));
   }
 
   try {
@@ -189,11 +195,11 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       { id: 'ai-planning', label: 'Comparar com planejamento', payload: { kind: 'planning', month: targetMonth } },
     ];
     responseBody.state.month = targetMonth;
-    return res.status(200).json(responseBody);
+    return res.status(200).json(ensureArrays(responseBody));
   } catch (err) {
     console.error('[assistant] insight error', err);
     responseBody.assistantMessage = 'Não consegui gerar insights agora. Tente mais tarde.';
-    return res.status(200).json(responseBody);
+    return res.status(200).json(ensureArrays(responseBody));
   }
 });
 
