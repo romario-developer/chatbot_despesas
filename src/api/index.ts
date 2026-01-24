@@ -16,6 +16,7 @@ import planningRoutes from './routes/planning';
 import quickEntryRoutes from './routes/quickEntry';
 import reportsRoutes from './routes/reports';
 import summaryRoutes from './routes/summary';
+import aiRoutes from './routes/ai';
 
 export const API_BASE_PATH = '/api';
 const router = Router();
@@ -29,6 +30,7 @@ router.use('/admin', adminRoutes);
 
 router.use(authMiddleware);
 router.use('/assistant', assistantRoutes);
+router.use('/ai', aiRoutes);
 router.use(noCacheMiddleware);
 router.use('/entries', entriesRoutes);
 router.use('/dashboard', dashboardRoutes);

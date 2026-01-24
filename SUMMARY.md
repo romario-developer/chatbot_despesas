@@ -33,6 +33,10 @@
 - `npm run db:reset`: limpa dados transacionais (despesas, rascunhos, planejamento, sessões) exigindo `RESET_CONFIRM=YES`.
 - Outras migrations (`migrateUserData*`) suportam limpeza ou consolidação de dados herdados.
 
+## Assistente Inteligente
+- `POST /api/ai/chat` entrega respostas humanas baseadas em dashboard, categorias, faturas e planejamento. A API enfileira history curto por `conversationId`, usa ferramentas internas para obter dados reais e devolve `cards`, `suggestedActions` e `assistantMessage` para o frontend alimentar a nova página Assistente.
+- O payload mantém `cards` tipo `metric|list|summary`, sugere ações como “Ver 10 maiores gastos” ou “Mostrar faturas abertas” e expõe `debug.toolsUsed` apenas em DEV.
+
 ## Execução
 - Desenvolvimento: `npm run dev`
 - Build: `npm run build`
