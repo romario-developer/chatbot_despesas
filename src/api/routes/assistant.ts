@@ -31,6 +31,63 @@ const ASSISTANT_FALLBACK_MESSAGE =
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 const CIRCUIT_BREAKER_WINDOW = 10 * 60 * 1000;
 
+const chatSchema = z.object({
+  message: z.string().min(1),
+  month: z.string().regex(MONTH_PATTERN).optional(),
+  conversationId: z.string().optional(),
+});
+
+const MONTH_INTENT_KEYWORDS = ['mês', 'mes', 'saldo', 'gasto', 'despesa', 'receita', 'cartão', 'cartao', 'fatura', 'planejamento', 'meta'];
+const GREETING_KEYWORDS = ['oi', 'ola', 'olá', 'oie', 'e aí', 'e ai', 'bom dia', 'boa tarde', 'boa noite'];
+
+function normalizeMessage(input: string) {
+  return input.trim().toLowerCase();
+}
+
+function includesKeyword(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+router.post('/chat', (req: AuthedRequest, res) => {
+  const validation = chatSchema.safeParse(req.body ?? {});
+  if (!validation.success) {
+    return res.status(400).json({ error: 'Corpo inválido', details: validation.error.format() });
+  }
+
+  const { message, month, conversationId: providedId } = validation.data;
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const normalized = normalizeMessage(message);
+  const convId = providedId || randomUUID();
+  let assistantMessage = 'Desculpa, ainda estou aprendendo. Pode reformular?';
+  let pendingQuestion: 'none' | 'askMonth' = 'none';
+
+  if (includesKeyword(normalized, GREETING_KEYWORDS)) {
+    assistantMessage =
+      'Oi! Quer analisar saldo, gastos, cartões ou planejamento? Qual mês você quer ver?';
+  } else if (!month && includesKeyword(normalized, MONTH_INTENT_KEYWORDS)) {
+    assistantMessage = 'Me diga qual mês deseja analisar (formato YYYY-MM). Posso usar o atual se preferir.';
+    pendingQuestion = 'askMonth';
+  } else {
+    assistantMessage = 'Entendi. Por enquanto, posso responder sobre saldo, gastos e cartões.';
+  }
+
+  return res.status(200).json({
+    conversationId: convId,
+    assistantMessage,
+    cards: [],
+    suggestedActions: [],
+    state: {
+      month: month ?? null,
+      topic: 'unknown',
+      pendingQuestion,
+    },
+  });
+});
+
 let openAICircuitBreakUntil: number | null = null;
 
 function safeDateYYYYMMDD(input?: string | null) {
