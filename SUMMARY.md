@@ -34,7 +34,7 @@
 - Outras migrations (`migrateUserData*`) suportam limpeza ou consolidação de dados herdados.
 
 ## Assistente Inteligente
-- `POST /api/ai/chat` entrega respostas humanas baseadas em dashboard, categorias, faturas e planejamento. A API enfileira history curto por `conversationId`, usa ferramentas internas para obter dados reais e devolve `cards`, `suggestedActions` e `assistantMessage` para o frontend alimentar a nova página Assistente.
+- `POST /api/assistant/chat` unifica saudações, entradas rápidas de gastos e perguntas de insights. O backend detecta lançamentos simples (ex.: “mercado 50”), registra usando o parser do quick-entry e confirma no chat, ou busca dados reais (dashboard, categorias, faturas, planejamento) para responder com cards, suggestedActions e estado atual.
 - O payload mantém `cards` tipo `metric|list|summary`, sugere ações como “Ver 10 maiores gastos” ou “Mostrar faturas abertas” e expõe `debug.toolsUsed` apenas em DEV.
 
 ## Execução

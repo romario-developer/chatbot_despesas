@@ -44,10 +44,10 @@ Backend API em Node.js/TypeScript usado exclusivamente pela PWA do Chat Despesas
 - Modelagem: valores são armazenados em centavos (`amountCents`); o front entrega/consome montantes em reais. Categorias, cartões, créditos, planejamento e relatórios estão ligados ao usuário autenticado.
 - Rotas adicionais usadas pelo PWA: `/api/dashboard`, `/api/cards`, `/api/credits`, `/api/assistant`, `/api/planning`, `/api/reports`, `/api/quick-entry`, `/api/me` e `/api/admin/exports/expenses.csv`.
 
-### Assistente Inteligente (/api/ai/chat)
-- Endpoint conversational que consome dados reais para gerar respostas humanas baseadas em lançamentos, dashboard, cartões/faturas e planejamento.
-- `POST /api/ai/chat` requer body `{ message, month?: "YYYY-MM", conversationId?: string }` e responde com o `conversationId`, `assistantMessage`, `cards` (agrupamentos métricos/listas/resumos), `suggestedActions` e, em desenvolvimento, `debug.toolsUsed`.
-- As `cards` incluem métricas de saldo, categorias e maiores gastos, enquanto as `suggestedActions` oferecem atalhos como “Ver 10 maiores gastos” ou “Mostrar faturas em aberto”. O frontend deve enviar `conversationId` para manter contexto e replantar histórico curto.
+### Assistente Inteligente (/api/assistant/chat)
+- Um único endpoint que responde saudações, entradas rápidas de gastos (“mercado 50”) e perguntas sobre saldo, faturas ou planejamento sem depender de IA externa.
+- `POST /api/assistant/chat` aceita `{ message, month?: "YYYY-MM", conversationId?: string }` e sempre devolve `assistantMessage`, `cards`, `suggestedActions` e um `state` com o mês ou `null`.
+- Quando detectar texto de lançamento valida e registra usando o parser do quick-entry, o retorno confirma o gasto e sugere ações como “Editar categoria” ou “Desfazer”; caso contrário, responde com cards baseados em dashboard, categorias, faturas e planejamento reais.
 
 ### Endpoints principais
 - `POST /api/auth/login` - retorna `{ token }`.
