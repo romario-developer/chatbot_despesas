@@ -111,14 +111,6 @@ function questionForField(field: PendingQuestion) {
   }
 }
 
-function buildConfirmationActions() {
-  return [
-    { id: 'assistant-undo', label: 'Desfazer', payload: { kind: 'assistant-undo' } },
-    { id: 'assistant-change-payment', label: 'Trocar pagamento', payload: { kind: 'assistant-change', field: 'paymentMethod' } },
-    { id: 'assistant-change-category', label: 'Trocar categoria', payload: { kind: 'assistant-change', field: 'category' } },
-  ];
-}
-
 function getPaymentLabel(method?: string) {
   if (!method) return 'forma de pagamento';
   return PAYMENT_LABELS[method] ?? method;
@@ -275,7 +267,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           conversationId: convId,
           assistantMessage,
           cards: [],
-          suggestedActions: buildConfirmationActions(),
+          suggestedActions: [],
           state: { pendingQuestion: 'none' },
         }),
       );
