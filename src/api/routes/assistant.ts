@@ -146,7 +146,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: "Pode mandar a despesa. Ex: 'mercado 50' ou 'gastei 25 no pix'.",
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: 'amount' },
+          state: { pendingQuestion: 'amount', stage: STAGE_FOR_FIELD.amount },
         }),
       );
   }
@@ -173,7 +173,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
               assistantMessage: 'Ok, desfiz o último registro.',
               cards: [],
               suggestedActions: [],
-              state: { pendingQuestion: 'none' },
+              state: { pendingQuestion: 'none', stage: 'undo' },
             }),
           );
       }
@@ -186,7 +186,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: 'Não encontrei um gasto recente para desfazer.',
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: state?.pendingQuestion ?? 'none' },
+          state: { pendingQuestion: state?.pendingQuestion ?? 'none', stage: 'undo' },
         }),
       );
   }
@@ -218,7 +218,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
             assistantMessage: questionForField(missingField),
             cards: [],
             suggestedActions: actions,
-            state: { pendingQuestion: missingField },
+            state: { pendingQuestion: missingField, stage },
           }),
         );
     }
@@ -268,7 +268,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage,
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: 'none' },
+          state: { pendingQuestion: 'none', stage: 'saved' },
         }),
       );
   } catch (err) {
@@ -281,7 +281,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: 'Não consegui registrar o gasto agora. Tente novamente em instantes.',
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: state?.pendingQuestion ?? 'none' },
+          state: { pendingQuestion: state?.pendingQuestion ?? 'none', stage: 'ask_amount' },
         }),
       );
   }
