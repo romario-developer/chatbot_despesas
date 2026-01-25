@@ -30,3 +30,11 @@ export async function findCardByNameGuess(userId: number, guess: string | undefi
     select: CARD_SELECT,
   });
 }
+
+export async function listCardsForUser(userId: number) {
+  return prisma.card.findMany({
+    where: { userId },
+    select: CARD_SELECT,
+    orderBy: { name: 'asc' },
+  });
+}
