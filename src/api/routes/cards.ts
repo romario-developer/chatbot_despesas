@@ -557,6 +557,83 @@ router.get('/:cardId/invoices/:cycleEnd', async (req: AuthedRequest, res) => {
   });
 });
 
+router.get('/:cardId/invoice', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
+
+  const parsedCardId =
+    typeof req.params.cardId === 'string' ? Number.parseInt(req.params.cardId.trim(), 10) : NaN;
+  if (!Number.isInteger(parsedCardId) || parsedCardId <= 0) {
+    return res.status(400).json({ error: 'cardId invalido' });
+  }
+
+  const rawMonth = Array.isArray(req.query.month) ? req.query.month[0] : req.query.month;
+  const parsedMonth = parseMonthParam(rawMonth);
+  if (!parsedMonth) {
+    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  }
+
+  const card = await prisma.card.findFirst({
+    where: { id: parsedCardId, userId },
+    select: { id: true, name: true, brand: true, closingDay: true, dueDay: true },
+  });
+  if (!card) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const cycle = getCardCycleForMonth(card, parsedMonth);
+  const entries = await prisma.expense.findMany({
+    where: {
+      userId,
+      cardId: card.id,
+      paymentMethod: 'CREDIT',
+      date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
+    },
+    include: { category: true },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+  });
+
+  const remainingCents = entries.reduce((sum, entry) => sum + entry.amountCents, 0);
+  const formattedEntries = entries.map((entry) => {
+    const installmentInfo =
+      entry.installmentCurrent !== null && entry.installmentTotal !== null
+        ? { current: entry.installmentCurrent, total: entry.installmentTotal }
+        : undefined;
+    return {
+      id: entry.id,
+      date: dayjs(entry.date).tz(TZ).format('YYYY-MM-DD'),
+      description: entry.description,
+      amount: centsToNumber(entry.amountCents),
+      category: entry.category?.name ?? null,
+      paymentMethod: entry.paymentMethod,
+      installmentInfo,
+    };
+  });
+
+  const invoiceStatus = remainingCents > 0 ? 'open' : 'paid';
+  return res.json({
+    card: {
+      id: card.id,
+      name: card.name,
+      brand: card.brand,
+      closingDay: card.closingDay,
+      dueDay: card.dueDay,
+    },
+    month: parsedMonth,
+    invoice: {
+      status: invoiceStatus,
+      remaining: centsToNumber(remainingCents),
+      closingDate: cycle.cycleEnd.format('YYYY-MM-DD'),
+      dueDate: cycle.dueDate.format('YYYY-MM-DD'),
+      cycleStart: cycle.cycleStart.format('YYYY-MM-DD'),
+      cycleEnd: cycle.cycleEnd.format('YYYY-MM-DD'),
+    },
+    entries: formattedEntries,
+  });
+});
+
 router.get('/:cardId/purchases', async (req: AuthedRequest, res) => {
   if (!req.user || !Number.isInteger(req.user.id)) {
     return res.status(401).json({ error: 'Unauthorized' });
