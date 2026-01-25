@@ -1,4 +1,5 @@
 import type { PaymentMethod } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 import { prisma } from '../db/prisma';
 
@@ -29,7 +30,7 @@ function hydrateDraft(raw: unknown): PendingExpenseDraft {
 }
 
 function prepareDraftForStorage(draft: PendingExpenseDraft) {
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, Prisma.InputJsonValue> = {};
   if (typeof draft.amountCents === 'number') payload.amountCents = draft.amountCents;
   if (draft.description) payload.description = draft.description;
   if (draft.paymentMethod) payload.paymentMethod = draft.paymentMethod;
@@ -71,18 +72,21 @@ export async function upsertAssistantConversationState(params: {
 }) {
   const { conversationId, userId, pendingExpenseDraft, pendingQuestion, lastExpenseId } = params;
   const payload = prepareDraftForStorage(pendingExpenseDraft);
+  const storedDraft = Object.keys(payload).length
+    ? (payload as Prisma.InputJsonObject)
+    : undefined;
   await prisma.assistantConversation.upsert({
     where: { conversationId },
     update: {
       userId,
-      pendingDraft: Object.keys(payload).length ? payload : null,
+      pendingDraft: storedDraft,
       pendingQuestion,
       lastExpenseId: lastExpenseId ?? null,
     },
     create: {
       conversationId,
       userId,
-      pendingDraft: Object.keys(payload).length ? payload : null,
+      pendingDraft: storedDraft,
       pendingQuestion,
       lastExpenseId: lastExpenseId ?? null,
     },

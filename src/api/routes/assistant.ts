@@ -191,7 +191,10 @@ router.post('/chat', async (req: AuthedRequest, res) => {
     const amount = mergedDraft.amountCents!;
     const finalDescription = mergedDraft.description ?? 'Sem descrição';
     const paymentMethod = mergedDraft.paymentMethod!;
-    const date = mergedDraft.date ?? normalizeDateOnly(nowBahia().toDate());
+    let date = mergedDraft.date;
+    if (!date) {
+      date = normalizeDateOnly(nowBahia().toDate()) ?? nowBahia().toDate();
+    }
     const categoryName = mergedDraft.categoryName ?? 'Outros';
     const assumedDate = !mergedDraft.date;
 
