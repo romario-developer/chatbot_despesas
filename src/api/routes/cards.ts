@@ -376,6 +376,13 @@ router.get('/invoices/open', async (req: AuthedRequest, res) => {
 
       return {
         card: dto,
+        cardId: card.id,
+        name: dto.name,
+        brand: dto.brand,
+        closingDay: dto.closingDay,
+        dueDay: dto.dueDay,
+        closingDate: cycle.cycleEnd.toISOString(),
+        dueDate: cycle.dueDate.toISOString(),
         cycleStart: cycle.cycleStart.toISOString(),
         cycleEnd: cycle.cycleEnd.toISOString(),
         invoiceTotal: centsToNumber(invoiceTotalCents),
