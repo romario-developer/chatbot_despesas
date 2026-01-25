@@ -1,3 +1,5 @@
+import type { PaymentMethod } from '@prisma/client';
+
 import { prisma } from '../db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
@@ -9,6 +11,8 @@ export interface ParsedExpenseInput {
   categoryName: string;
   date: Date;
   rawText: string;
+  paymentMethod?: PaymentMethod;
+  cardId?: number | null;
 }
 
 export async function createExpense(userId: number, input: ParsedExpenseInput) {
@@ -21,6 +25,8 @@ export async function createExpense(userId: number, input: ParsedExpenseInput) {
       userId,
       categoryId: category.id,
       amountCents,
+      paymentMethod: input.paymentMethod ?? 'OTHER',
+      cardId: input.cardId ?? undefined,
       description: input.description || 'Sem descrição',
       date: input.date,
       rawText: input.rawText,
