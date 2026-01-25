@@ -69,6 +69,7 @@ model AssistantConversation {
   userId         Int
   pendingDraft   Json?
   pendingQuestion String @default("none")
+  stage          String @default("idle")
   lastExpenseId  Int?
   updatedAt      DateTime @updatedAt
 

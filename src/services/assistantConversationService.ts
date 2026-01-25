@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 
 export type PendingQuestion = 'none' | 'amount' | 'description' | 'paymentMethod' | 'card';
+export type AssistantStage = 'idle' | 'ask_amount' | 'ask_description' | 'ask_payment' | 'ask_card' | 'saved';
 
 export type PendingExpenseDraft = {
   amountCents?: number;
@@ -13,8 +14,6 @@ export type PendingExpenseDraft = {
   date?: Date;
   categoryName?: string;
 };
-
-const PENDING_QUESTIONS: PendingQuestion[] = ['none', 'amount', 'description', 'paymentMethod', 'card'];
 
 function hydrateDraft(raw: unknown): PendingExpenseDraft {
   if (!raw) return {};
@@ -40,12 +39,36 @@ function prepareDraftForStorage(draft: PendingExpenseDraft) {
   return payload;
 }
 
+const STAGE_ORDER: AssistantStage[] = ['idle', 'ask_amount', 'ask_description', 'ask_payment', 'ask_card', 'saved'];
+
+function hydrateStage(value: string | null | undefined): AssistantStage {
+  if (!value) return 'idle';
+  const stage = value as AssistantStage;
+  if (STAGE_ORDER.includes(stage)) return stage;
+  return 'idle';
+}
+
+function stageToPendingQuestion(stage: AssistantStage): PendingQuestion {
+  switch (stage) {
+    case 'ask_amount':
+      return 'amount';
+    case 'ask_description':
+      return 'description';
+    case 'ask_payment':
+      return 'paymentMethod';
+    case 'ask_card':
+      return 'card';
+    default:
+      return 'none';
+  }
+}
+
 export async function getAssistantConversationState(
   conversationId: string,
   userId: number,
 ): Promise<{
   pendingExpenseDraft: PendingExpenseDraft;
-  pendingQuestion: PendingQuestion;
+  stage: AssistantStage;
   lastExpenseId?: number;
 } | null> {
   if (!conversationId) return null;
@@ -53,12 +76,9 @@ export async function getAssistantConversationState(
     where: { conversationId },
   });
   if (!record || record.userId !== userId) return null;
-  const question = PENDING_QUESTIONS.includes(record.pendingQuestion as PendingQuestion)
-    ? (record.pendingQuestion as PendingQuestion)
-    : 'none';
   return {
     pendingExpenseDraft: hydrateDraft(record.pendingDraft),
-    pendingQuestion: question,
+    stage: hydrateStage(record.stage),
     lastExpenseId: record.lastExpenseId ?? undefined,
   };
 }
@@ -67,20 +87,22 @@ export async function upsertAssistantConversationState(params: {
   conversationId: string;
   userId: number;
   pendingExpenseDraft: PendingExpenseDraft;
-  pendingQuestion: PendingQuestion;
+  stage: AssistantStage;
   lastExpenseId?: number | null;
 }) {
-  const { conversationId, userId, pendingExpenseDraft, pendingQuestion, lastExpenseId } = params;
+  const { conversationId, userId, pendingExpenseDraft, stage, lastExpenseId } = params;
   const payload = prepareDraftForStorage(pendingExpenseDraft);
   const storedDraft = Object.keys(payload).length
     ? (payload as Prisma.InputJsonObject)
     : undefined;
+  const pendingQuestion = stageToPendingQuestion(stage);
   await prisma.assistantConversation.upsert({
     where: { conversationId },
     update: {
       userId,
       pendingDraft: storedDraft,
       pendingQuestion,
+      stage,
       lastExpenseId: lastExpenseId ?? null,
     },
     create: {
@@ -88,6 +110,7 @@ export async function upsertAssistantConversationState(params: {
       userId,
       pendingDraft: storedDraft,
       pendingQuestion,
+      stage,
       lastExpenseId: lastExpenseId ?? null,
     },
   });

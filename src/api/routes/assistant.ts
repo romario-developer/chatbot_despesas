@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AuthedRequest } from '../middleware/auth';
 import { createExpense, deleteExpense } from '../../services/expenseService';
 import {
+  AssistantStage,
   getAssistantConversationState,
   PendingExpenseDraft,
   PendingQuestion,
@@ -36,10 +37,10 @@ const PAYMENT_ACTIONS = [
   { id: 'assistant-pay-credit', label: 'Crédito', payload: { paymentMethod: 'CREDIT' } },
   { id: 'assistant-pay-cash', label: 'Dinheiro', payload: { paymentMethod: 'CASH' } },
 ];
-const STAGE_FOR_FIELD: Record<PendingQuestion, string> = {
+const STAGE_FOR_FIELD: Record<PendingQuestion, AssistantStage> = {
   amount: 'ask_amount',
-  description: 'ask_desc',
-  paymentMethod: 'ask_pay',
+  description: 'ask_description',
+  paymentMethod: 'ask_payment',
   card: 'ask_card',
   none: 'saved',
 };
@@ -48,6 +49,38 @@ function ensureArrays(target: any) {
   target.cards = Array.isArray(target.cards) ? target.cards : [];
   target.suggestedActions = Array.isArray(target.suggestedActions) ? target.suggestedActions : [];
   return target;
+}
+
+function buildDraftResponse(draft: PendingExpenseDraft) {
+  const result: Record<string, unknown> = {};
+  if (typeof draft.amountCents === 'number') {
+    result.amountCents = draft.amountCents;
+  }
+  if (draft.description) {
+    result.description = draft.description;
+  }
+  if (draft.paymentMethod) {
+    result.paymentMethod = draft.paymentMethod;
+  }
+  if (typeof draft.cardId === 'number') {
+    result.cardId = draft.cardId;
+  }
+  if (draft.date) {
+    result.date = draft.date.toISOString();
+  }
+  if (draft.categoryName) {
+    result.categoryName = draft.categoryName;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function buildStatePayload(stage: AssistantStage, draft?: PendingExpenseDraft) {
+  const payload: { stage: AssistantStage; draft?: Record<string, unknown> } = { stage };
+  const draftResponse = draft ? buildDraftResponse(draft) : undefined;
+  if (draftResponse) {
+    payload.draft = draftResponse;
+  }
+  return payload;
 }
 
 function includesGreeting(text: string) {
@@ -136,8 +169,18 @@ router.post('/chat', async (req: AuthedRequest, res) => {
   const normalizedMessage = message.trim();
   const normalizedLower = normalizedMessage.toLowerCase();
 
+  let state = await getAssistantConversationState(convId, userId);
+
   if (includesGreeting(normalizedLower)) {
-    logStage(userId, 'ask_amount');
+    const stage = STAGE_FOR_FIELD.amount;
+    await upsertAssistantConversationState({
+      conversationId: convId,
+      userId,
+      pendingExpenseDraft: state?.pendingExpenseDraft ?? {},
+      stage,
+      lastExpenseId: state?.lastExpenseId ?? null,
+    });
+    logStage(userId, stage);
     return res
       .status(200)
       .json(
@@ -146,15 +189,14 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: "Pode mandar a despesa. Ex: 'mercado 50' ou 'gastei 25 no pix'.",
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: 'amount', stage: STAGE_FOR_FIELD.amount },
+          state: buildStatePayload(stage, state?.pendingExpenseDraft),
         }),
       );
   }
 
-  let state = await getAssistantConversationState(convId, userId);
-
   if (isUndoRequest(normalizedLower)) {
-    logStage(userId, 'undo');
+    const stage: AssistantStage = 'idle';
+    logStage(userId, stage);
     if (state?.lastExpenseId) {
       const removed = await deleteExpense(userId, state.lastExpenseId);
       if (removed) {
@@ -162,7 +204,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           conversationId: convId,
           userId,
           pendingExpenseDraft: {},
-          pendingQuestion: 'none',
+          stage,
           lastExpenseId: null,
         });
         return res
@@ -173,7 +215,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
               assistantMessage: 'Ok, desfiz o último registro.',
               cards: [],
               suggestedActions: [],
-              state: { pendingQuestion: 'none', stage: 'undo' },
+              state: buildStatePayload(stage),
             }),
           );
       }
@@ -186,7 +228,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: 'Não encontrei um gasto recente para desfazer.',
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: state?.pendingQuestion ?? 'none', stage: 'undo' },
+          state: buildStatePayload(stage),
         }),
       );
   }
@@ -199,16 +241,16 @@ router.post('/chat', async (req: AuthedRequest, res) => {
     const missingField = determineMissingField(mergedDraft);
 
     if (missingField) {
+      const stage = STAGE_FOR_FIELD[missingField];
       await upsertAssistantConversationState({
         conversationId: convId,
         userId,
         pendingExpenseDraft: mergedDraft,
-        pendingQuestion: missingField,
+        stage,
         lastExpenseId: state?.lastExpenseId ?? null,
       });
 
       const actions = await buildQuestionActions(missingField, userId);
-      const stage = STAGE_FOR_FIELD[missingField] ?? 'ask';
       logStage(userId, stage);
       return res
         .status(200)
@@ -218,7 +260,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
             assistantMessage: questionForField(missingField),
             cards: [],
             suggestedActions: actions,
-            state: { pendingQuestion: missingField, stage },
+            state: buildStatePayload(stage, mergedDraft),
           }),
         );
     }
@@ -231,7 +273,6 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       date = normalizeDateOnly(nowBahia().toDate()) ?? nowBahia().toDate();
     }
     const categoryName = mergedDraft.categoryName ?? 'Outros';
-    const assumedDate = !mergedDraft.date;
     const card = mergedDraft.cardId ? await findCardByIdForUser(userId, mergedDraft.cardId) : null;
 
     const created = await createExpense(userId, {
@@ -244,21 +285,19 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       cardId: mergedDraft.cardId ?? undefined,
     });
 
+    const stage: AssistantStage = 'saved';
     await upsertAssistantConversationState({
       conversationId: convId,
       userId,
       pendingExpenseDraft: {},
-      pendingQuestion: 'none',
+      stage,
       lastExpenseId: created.expense.id,
     });
 
-    let paymentDescriptor = paymentMethod === 'CREDIT' ? `Crédito ${card?.name ?? 'cartão'}` : getPaymentLabel(paymentMethod);
-    if (assumedDate) {
-      paymentDescriptor += '; data assumida hoje';
-    }
-
-    const assistantMessage = `Registrado: ${finalDescription} — ${formatCurrency(amount)} (${paymentDescriptor})`;
-    logStage(userId, 'saved');
+    const paymentSummaryLabel = paymentMethod === 'CREDIT' ? `Crédito ${card?.name ?? 'cartão'}` : getPaymentLabel(paymentMethod);
+    const summary = `${finalDescription} — ${formatCurrency(amount)} (${paymentSummaryLabel})`;
+    const assistantMessage = 'Registrado.';
+    logStage(userId, stage);
 
     return res
       .status(200)
@@ -268,11 +307,13 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage,
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: 'none', stage: 'saved' },
+          state: buildStatePayload(stage),
+          uiHint: { kind: 'saved', summary },
         }),
       );
   } catch (err) {
     console.error('[assistant] expense error', err);
+    const fallbackStage: AssistantStage = state?.stage ?? 'idle';
     return res
       .status(500)
       .json(
@@ -281,7 +322,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: 'Não consegui registrar o gasto agora. Tente novamente em instantes.',
           cards: [],
           suggestedActions: [],
-          state: { pendingQuestion: state?.pendingQuestion ?? 'none', stage: 'ask_amount' },
+          state: buildStatePayload(fallbackStage, state?.pendingExpenseDraft),
         }),
       );
   }
