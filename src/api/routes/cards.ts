@@ -569,68 +569,75 @@ router.get('/:cardId/invoice', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'cardId invalido' });
   }
 
-  const rawMonth = Array.isArray(req.query.month) ? req.query.month[0] : req.query.month;
-  const parsedMonth = parseMonthParam(rawMonth);
-  if (!parsedMonth) {
+  const rawMonthParam = normalizeQueryParam(req.query.month);
+  const monthInput =
+    typeof rawMonthParam === 'string'
+      ? rawMonthParam.trim()
+      : Array.isArray(rawMonthParam) && rawMonthParam.length
+      ? rawMonthParam[0].trim()
+      : undefined;
+  const providedMonth = typeof monthInput === 'string' && monthInput.length > 0;
+  const parsedMonth = providedMonth ? parseMonthParam(monthInput) : null;
+  if (providedMonth && !parsedMonth) {
     return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
   }
+  const month = parsedMonth ?? nowBahia().tz(TZ).format('YYYY-MM');
 
   const card = await prisma.card.findFirst({
     where: { id: parsedCardId, userId },
-    select: { id: true, name: true, brand: true, closingDay: true, dueDay: true },
+    select: { id: true, name: true, brand: true },
   });
   if (!card) {
     return res.status(404).json({ error: 'Cartao nao encontrado' });
   }
 
-  const cycle = getCardCycleForMonth(card, parsedMonth);
-  const entries = await prisma.expense.findMany({
+  const startOfMonth = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ).startOf('day');
+  const endOfMonth = startOfMonth.clone().add(1, 'month');
+
+  const purchases = await prisma.expense.findMany({
     where: {
       userId,
       cardId: card.id,
       paymentMethod: 'CREDIT',
-      date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
+      date: { gte: startOfMonth.toDate(), lt: endOfMonth.toDate() },
     },
     include: { category: true },
-    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
   });
 
-  const remainingCents = entries.reduce((sum, entry) => sum + entry.amountCents, 0);
-  const formattedEntries = entries.map((entry) => {
+  const totalCents = purchases.reduce((sum, entry) => sum + entry.amountCents, 0);
+  const formattedPurchases = purchases.map((entry) => {
     const installmentInfo =
-      entry.installmentCurrent !== null && entry.installmentTotal !== null
-        ? { current: entry.installmentCurrent, total: entry.installmentTotal }
+      entry.installmentCurrent !== null || entry.installmentTotal !== null
+        ? {
+            current: entry.installmentCurrent ?? undefined,
+            total: entry.installmentTotal ?? undefined,
+          }
         : undefined;
     return {
       id: entry.id,
       date: dayjs(entry.date).tz(TZ).format('YYYY-MM-DD'),
       description: entry.description,
       amount: centsToNumber(entry.amountCents),
-      category: entry.category?.name ?? null,
+      categoryName: entry.category?.name ?? null,
       paymentMethod: entry.paymentMethod,
       installmentInfo,
+      createdAt: entry.createdAt,
     };
   });
 
-  const invoiceStatus = remainingCents > 0 ? 'open' : 'paid';
   return res.json({
     card: {
       id: card.id,
       name: card.name,
       brand: card.brand,
-      closingDay: card.closingDay,
-      dueDay: card.dueDay,
     },
-    month: parsedMonth,
-    invoice: {
-      status: invoiceStatus,
-      remaining: centsToNumber(remainingCents),
-      closingDate: cycle.cycleEnd.format('YYYY-MM-DD'),
-      dueDate: cycle.dueDate.format('YYYY-MM-DD'),
-      cycleStart: cycle.cycleStart.format('YYYY-MM-DD'),
-      cycleEnd: cycle.cycleEnd.format('YYYY-MM-DD'),
+    month,
+    totals: {
+      total: centsToNumber(totalCents),
+      count: purchases.length,
     },
-    entries: formattedEntries,
+    purchases: formattedPurchases,
   });
 });
 
