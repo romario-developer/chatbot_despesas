@@ -4,7 +4,14 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 
 export type PendingQuestion = 'none' | 'amount' | 'description' | 'paymentMethod' | 'card';
-export type AssistantStage = 'idle' | 'ask_amount' | 'ask_description' | 'ask_payment' | 'ask_card' | 'saved';
+export type AssistantStage =
+  | 'idle'
+  | 'ask_description'
+  | 'ask_amount'
+  | 'ask_payment'
+  | 'ask_card'
+  | 'confirming'
+  | 'saved';
 
 export type PendingExpenseDraft = {
   amountCents?: number;
@@ -39,7 +46,15 @@ function prepareDraftForStorage(draft: PendingExpenseDraft) {
   return payload;
 }
 
-const STAGE_ORDER: AssistantStage[] = ['idle', 'ask_amount', 'ask_description', 'ask_payment', 'ask_card', 'saved'];
+const STAGE_ORDER: AssistantStage[] = [
+  'idle',
+  'ask_description',
+  'ask_amount',
+  'ask_payment',
+  'ask_card',
+  'confirming',
+  'saved',
+];
 
 function hydrateStage(value: string | null | undefined): AssistantStage {
   if (!value) return 'idle';
@@ -58,6 +73,8 @@ function stageToPendingQuestion(stage: AssistantStage): PendingQuestion {
       return 'paymentMethod';
     case 'ask_card':
       return 'card';
+    case 'confirming':
+      return 'none';
     default:
       return 'none';
   }

@@ -38,11 +38,11 @@ const PAYMENT_ACTIONS = [
   { id: 'assistant-pay-cash', label: 'Dinheiro', payload: { paymentMethod: 'CASH' } },
 ];
 const STAGE_FOR_FIELD: Record<PendingQuestion, AssistantStage> = {
-  amount: 'ask_amount',
   description: 'ask_description',
+  amount: 'ask_amount',
   paymentMethod: 'ask_payment',
   card: 'ask_card',
-  none: 'saved',
+  none: 'confirming',
 };
 
 function ensureArrays(target: any) {
@@ -122,8 +122,8 @@ function mergeDraft(existing: PendingExpenseDraft, parsed: Partial<PendingExpens
 }
 
 function determineMissingField(draft: PendingExpenseDraft): PendingQuestion | null {
-  if (!draft.amountCents || draft.amountCents <= 0) return 'amount';
   if (!draft.description) return 'description';
+  if (!draft.amountCents || draft.amountCents <= 0) return 'amount';
   if (!draft.paymentMethod) return 'paymentMethod';
   if (draft.paymentMethod === 'CREDIT' && !draft.cardId) return 'card';
   return null;
@@ -149,6 +149,10 @@ function getPaymentLabel(method?: string) {
   return PAYMENT_LABELS[method] ?? method;
 }
 
+function shouldResetConversation(stage?: AssistantStage) {
+  return !stage || stage === 'idle' || stage === 'saved';
+}
+
 function isUndoRequest(message: string) {
   return message.includes('desfazer');
 }
@@ -172,11 +176,11 @@ router.post('/chat', async (req: AuthedRequest, res) => {
   let state = await getAssistantConversationState(convId, userId);
 
   if (includesGreeting(normalizedLower)) {
-    const stage = STAGE_FOR_FIELD.amount;
+    const stage: AssistantStage = 'ask_description';
     await upsertAssistantConversationState({
       conversationId: convId,
       userId,
-      pendingExpenseDraft: state?.pendingExpenseDraft ?? {},
+      pendingExpenseDraft: {},
       stage,
       lastExpenseId: state?.lastExpenseId ?? null,
     });
@@ -189,7 +193,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: "Pode mandar a despesa. Ex: 'mercado 50' ou 'gastei 25 no pix'.",
           cards: [],
           suggestedActions: [],
-          state: buildStatePayload(stage, state?.pendingExpenseDraft),
+          state: buildStatePayload(stage),
         }),
       );
   }
@@ -233,7 +237,11 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       );
   }
 
-  const draftBase: PendingExpenseDraft = state?.pendingExpenseDraft ?? {};
+  const isFreshConversation = shouldResetConversation(state?.stage);
+  const draftBase: PendingExpenseDraft = isFreshConversation ? {} : state?.pendingExpenseDraft ?? {};
+  const lastExpenseId = state?.lastExpenseId ?? null;
+  let fallbackStage: AssistantStage = state?.stage ?? 'idle';
+  let fallbackDraft: PendingExpenseDraft | undefined = state?.pendingExpenseDraft;
 
   try {
     const parsed = await parseExpenseMessage(normalizedMessage, userId);
@@ -247,7 +255,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
         userId,
         pendingExpenseDraft: mergedDraft,
         stage,
-        lastExpenseId: state?.lastExpenseId ?? null,
+        lastExpenseId,
       });
 
       const actions = await buildQuestionActions(missingField, userId);
@@ -264,6 +272,17 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           }),
         );
     }
+
+    const confirmingStage: AssistantStage = 'confirming';
+    fallbackStage = confirmingStage;
+    fallbackDraft = mergedDraft;
+    await upsertAssistantConversationState({
+      conversationId: convId,
+      userId,
+      pendingExpenseDraft: mergedDraft,
+      stage: confirmingStage,
+      lastExpenseId,
+    });
 
     const amount = mergedDraft.amountCents!;
     const finalDescription = mergedDraft.description ?? 'Sem descrição';
@@ -285,19 +304,19 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       cardId: mergedDraft.cardId ?? undefined,
     });
 
-    const stage: AssistantStage = 'saved';
+    const savedStage: AssistantStage = 'saved';
     await upsertAssistantConversationState({
       conversationId: convId,
       userId,
       pendingExpenseDraft: {},
-      stage,
+      stage: savedStage,
       lastExpenseId: created.expense.id,
     });
 
     const paymentSummaryLabel = paymentMethod === 'CREDIT' ? `Crédito ${card?.name ?? 'cartão'}` : getPaymentLabel(paymentMethod);
     const summary = `${finalDescription} — ${formatCurrency(amount)} (${paymentSummaryLabel})`;
     const assistantMessage = 'Registrado.';
-    logStage(userId, stage);
+    logStage(userId, savedStage);
 
     return res
       .status(200)
@@ -307,13 +326,13 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage,
           cards: [],
           suggestedActions: [],
-          state: buildStatePayload(stage),
+          state: buildStatePayload(savedStage),
           uiHint: { kind: 'saved', summary },
         }),
       );
   } catch (err) {
     console.error('[assistant] expense error', err);
-    const fallbackStage: AssistantStage = state?.stage ?? 'idle';
+    const recoveryStage = fallbackStage;
     return res
       .status(500)
       .json(
@@ -322,7 +341,7 @@ router.post('/chat', async (req: AuthedRequest, res) => {
           assistantMessage: 'Não consegui registrar o gasto agora. Tente novamente em instantes.',
           cards: [],
           suggestedActions: [],
-          state: buildStatePayload(fallbackStage, state?.pendingExpenseDraft),
+          state: buildStatePayload(recoveryStage, fallbackDraft),
         }),
       );
   }
