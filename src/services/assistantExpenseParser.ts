@@ -31,6 +31,7 @@ type ParsedExpenseMessage = {
   dateProvided?: boolean;
   description?: string;
   categoryName?: string;
+  installmentsTotal?: number;
 };
 
 function normalizeForMatching(text: string) {
@@ -70,6 +71,15 @@ function extractAmount(text: string) {
   const cents = amountStringToCents(value);
   if (cents === null || cents <= 0) return null;
   return { amountCents: cents, matchedText: value };
+}
+
+function detectInstallments(text: string) {
+  const match = text.match(/(?:em\s+)?(\d{1,2})\s*[xX]\b/);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  if (!Number.isInteger(parsed) || parsed <= 1) return null;
+  const limited = Math.min(parsed, 36);
+  return { total: limited, matchedText: match[0] };
 }
 
 function parseDateFromMessage(text: string) {
@@ -192,6 +202,11 @@ export async function parseExpenseMessage(message: string, userId: number): Prom
     cleaned = removeSegment(cleaned, amount.matchedText);
   }
 
+  const installmentInfo = detectInstallments(cleaned);
+  if (installmentInfo) {
+    cleaned = removeSegment(cleaned, installmentInfo.matchedText);
+  }
+
   const description = cleaned.replace(/\s+/g, ' ').trim() || undefined;
   const categoryName = await inferCategoryName(userId, description ?? message);
 
@@ -203,6 +218,7 @@ export async function parseExpenseMessage(message: string, userId: number): Prom
     dateProvided: Boolean(parsedDate),
     description,
     categoryName,
+    installmentsTotal: installmentInfo?.total,
   };
 }
 

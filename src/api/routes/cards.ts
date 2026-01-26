@@ -145,6 +145,107 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
+function resolveInvoiceMonth(value: unknown): { month: string } | { error: string } {
+  const rawMonth = normalizeQueryParam(value);
+  const normalized =
+    typeof rawMonth === 'string'
+      ? rawMonth.trim()
+      : Array.isArray(rawMonth) && rawMonth.length
+      ? rawMonth[0].trim()
+      : undefined;
+  const provided = typeof normalized === 'string' && normalized.length > 0;
+  const parsedMonth = provided ? parseMonthParam(normalized) : null;
+  if (provided && !parsedMonth) {
+    return { error: 'Parametro "month" invalido. Use YYYY-MM.' };
+  }
+  return { month: parsedMonth ?? nowBahia().tz(TZ).format('YYYY-MM') };
+}
+
+type CardInvoiceItem = {
+  entryId: number;
+  description: string;
+  purchaseDate: string;
+  originalAmount: number;
+  installmentsTotal: number;
+  installmentNumber: number;
+  installmentAmount: number;
+  installmentMonth: string;
+  paymentMethod: string;
+  categoryName: string | null;
+  installmentGroupId: string | null;
+};
+
+async function loadCardInvoice(
+  userId: number,
+  cardId: number,
+  month: string,
+  cycle: CardCyclePeriod,
+): Promise<{ cycle: CardCyclePeriod; items: CardInvoiceItem[]; totalCents: number }> {
+  const entries = await prisma.expense.findMany({
+    where: {
+      userId,
+      cardId,
+      paymentMethod: 'CREDIT',
+      OR: [
+        { invoiceMonth: month },
+        {
+          invoiceMonth: null,
+          date: { gte: cycle.cycleStart.toDate(), lte: cycle.cycleEnd.toDate() },
+        },
+      ],
+    },
+    include: {
+      category: true,
+      installmentGroup: { select: { totalAmountCents: true } },
+    },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+  });
+
+  const totalCents = entries.reduce((sum, entry) => sum + entry.amountCents, 0);
+  const items = entries.map((entry) => ({
+    entryId: entry.id,
+    description: entry.description,
+    purchaseDate: dayjs(entry.date).tz(TZ).format('YYYY-MM-DD'),
+    originalAmount: centsToNumber(entry.installmentGroup?.totalAmountCents ?? entry.amountCents),
+    installmentsTotal: entry.installmentsTotal ?? 1,
+    installmentNumber: entry.installmentIndex ?? entry.installmentCurrent ?? 1,
+    installmentAmount: centsToNumber(entry.amountCents),
+    installmentMonth: entry.invoiceMonth ?? dayjs(entry.date).tz(TZ).format('YYYY-MM'),
+    paymentMethod: entry.paymentMethod,
+    categoryName: entry.category?.name ?? null,
+    installmentGroupId: entry.installmentGroupId ?? null,
+  }));
+
+  return { cycle, items, totalCents };
+}
+
+function buildInvoiceResponsePayload(
+  card: { id: number; name: string; brand: string; closingDay: number; dueDay: number },
+  month: string,
+  invoiceData: { cycle: CardCyclePeriod; items: CardInvoiceItem[]; totalCents: number },
+) {
+  return {
+    card: {
+      id: card.id,
+      name: card.name,
+      brand: card.brand,
+      closingDay: card.closingDay,
+      dueDay: card.dueDay,
+    },
+    month,
+    cycle: {
+      start: invoiceData.cycle.cycleStart.toISOString(),
+      end: invoiceData.cycle.cycleEnd.toISOString(),
+      dueDate: invoiceData.cycle.dueDate.toISOString(),
+    },
+    totals: {
+      total: centsToNumber(invoiceData.totalCents),
+      count: invoiceData.items.length,
+    },
+    items: invoiceData.items,
+  };
+}
+
 
 router.get('/summary', async (req: AuthedRequest, res) => {
   const userId = req.user?.id;
@@ -569,76 +670,54 @@ router.get('/:cardId/invoice', async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: 'cardId invalido' });
   }
 
-  const rawMonthParam = normalizeQueryParam(req.query.month);
-  const monthInput =
-    typeof rawMonthParam === 'string'
-      ? rawMonthParam.trim()
-      : Array.isArray(rawMonthParam) && rawMonthParam.length
-      ? rawMonthParam[0].trim()
-      : undefined;
-  const providedMonth = typeof monthInput === 'string' && monthInput.length > 0;
-  const parsedMonth = providedMonth ? parseMonthParam(monthInput) : null;
-  if (providedMonth && !parsedMonth) {
-    return res.status(400).json({ error: 'Parametro "month" invalido. Use YYYY-MM.' });
+  const monthResult = resolveInvoiceMonth(req.query.month);
+  if ('error' in monthResult) {
+    return res.status(400).json({ error: monthResult.error });
   }
-  const month = parsedMonth ?? nowBahia().tz(TZ).format('YYYY-MM');
+  const month = monthResult.month;
 
   const card = await prisma.card.findFirst({
     where: { id: parsedCardId, userId },
-    select: { id: true, name: true, brand: true },
+    select: { id: true, name: true, brand: true, closingDay: true, dueDay: true },
   });
   if (!card) {
     return res.status(404).json({ error: 'Cartao nao encontrado' });
   }
 
-  const startOfMonth = dayjs.tz(`${month}-01`, 'YYYY-MM-DD', TZ).startOf('day');
-  const endOfMonth = startOfMonth.clone().add(1, 'month');
+  const cycle = getCardCycleForMonth(card, month);
+  const invoiceData = await loadCardInvoice(userId, card.id, month, cycle);
+  return res.json(buildInvoiceResponsePayload(card, month, invoiceData));
+});
 
-  const purchases = await prisma.expense.findMany({
-    where: {
-      userId,
-      cardId: card.id,
-      paymentMethod: 'CREDIT',
-      date: { gte: startOfMonth.toDate(), lt: endOfMonth.toDate() },
-    },
-    include: { category: true },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
+router.get('/:cardId/invoice/summary', async (req: AuthedRequest, res) => {
+  if (!req.user || !Number.isInteger(req.user.id)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userId = req.user.id;
 
-  const totalCents = purchases.reduce((sum, entry) => sum + entry.amountCents, 0);
-  const formattedPurchases = purchases.map((entry) => {
-    const installmentInfo =
-      entry.installmentCurrent !== null || entry.installmentTotal !== null
-        ? {
-            current: entry.installmentCurrent ?? undefined,
-            total: entry.installmentTotal ?? undefined,
-          }
-        : undefined;
-    return {
-      id: entry.id,
-      date: dayjs(entry.date).tz(TZ).format('YYYY-MM-DD'),
-      description: entry.description,
-      amount: centsToNumber(entry.amountCents),
-      categoryName: entry.category?.name ?? null,
-      paymentMethod: entry.paymentMethod,
-      installmentInfo,
-      createdAt: entry.createdAt,
-    };
-  });
+  const parsedCardId =
+    typeof req.params.cardId === 'string' ? Number.parseInt(req.params.cardId.trim(), 10) : NaN;
+  if (!Number.isInteger(parsedCardId) || parsedCardId <= 0) {
+    return res.status(400).json({ error: 'cardId invalido' });
+  }
 
-  return res.json({
-    card: {
-      id: card.id,
-      name: card.name,
-      brand: card.brand,
-    },
-    month,
-    totals: {
-      total: centsToNumber(totalCents),
-      count: purchases.length,
-    },
-    purchases: formattedPurchases,
+  const monthResult = resolveInvoiceMonth(req.query.month);
+  if ('error' in monthResult) {
+    return res.status(400).json({ error: monthResult.error });
+  }
+  const month = monthResult.month;
+
+  const card = await prisma.card.findFirst({
+    where: { id: parsedCardId, userId },
+    select: { id: true, name: true, brand: true, closingDay: true, dueDay: true },
   });
+  if (!card) {
+    return res.status(404).json({ error: 'Cartao nao encontrado' });
+  }
+
+  const cycle = getCardCycleForMonth(card, month);
+  const invoiceData = await loadCardInvoice(userId, card.id, month, cycle);
+  return res.json(buildInvoiceResponsePayload(card, month, invoiceData));
 });
 
 router.get('/:cardId/purchases', async (req: AuthedRequest, res) => {

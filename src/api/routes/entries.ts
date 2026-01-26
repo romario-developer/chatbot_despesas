@@ -16,6 +16,7 @@ import {
 } from "../../services/cardService";
 import { parseInstallmentPattern } from "../../domain/installmentPattern";
 import { createInstallmentExpenses } from "../../services/installmentService";
+import { getInvoiceMonthForPurchase } from "../../utils/installments";
 
 const router = Router();
 const DEBUG_ENTRIES = process.env.DEBUG_ENTRIES === "1";
@@ -165,7 +166,7 @@ async function resolveCardIdForUser(userId: number, value: unknown) {
     return { error: { status: 403, message: "Cartao nao pertence ao usuario" } };
   }
 
-  return { cardId: card.id };
+  return { cardId: card.id, card };
 }
 
 async function resolveUser(req: AuthedRequest) {
@@ -431,6 +432,7 @@ router.post("/", async (req: AuthedRequest, res) => {
       source: "manual",
       installmentsTotal: installments,
       appendInstallmentLabel: true,
+      closingDay: cardCheck.card?.closingDay ?? 1,
     });
 
     console.log("[entries] created installments", {
@@ -449,6 +451,10 @@ router.post("/", async (req: AuthedRequest, res) => {
     });
   }
 
+  const invoiceMonth = cardCheck.card
+    ? getInvoiceMonthForPurchase(parsedDate, cardCheck.card.closingDay)
+    : dayjs(parsedDate).tz(TZ).format("YYYY-MM");
+
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
@@ -462,9 +468,12 @@ router.post("/", async (req: AuthedRequest, res) => {
       source: "manual",
       categorySource,
       purchaseLabel: parcelInfo.purchaseLabel ?? descriptionText,
-      postedMonth: dayjs(parsedDate).tz(TZ).format("YYYY-MM"),
+      postedMonth: invoiceMonth,
+      invoiceMonth,
       installmentCurrent: parcelInfo.current ?? null,
       installmentTotal: parcelInfo.total ?? null,
+      installmentIndex: 1,
+      installmentsTotal: installments,
     },
     include: { category: true, card: { select: CARD_SELECT } },
   });

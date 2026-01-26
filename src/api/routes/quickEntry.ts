@@ -17,6 +17,7 @@ import { inferCategory } from '../../domain/categorizer';
 import { DEFAULT_PAYMENT_METHOD } from '../../utils/paymentMethod';
 import { CARD_SELECT, CardSummary, findCardByNameGuess } from '../../services/cardService';
 import { createInstallmentExpenses } from '../../services/installmentService';
+import { getInvoiceMonthForPurchase } from '../../utils/installments';
 import type { AuthedRequest } from '../middleware/auth';
 
 const CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', {
@@ -220,6 +221,7 @@ router.post('/', async (req: AuthedRequest, res) => {
       source: 'pwa-quick',
       installmentsTotal,
       appendInstallmentLabel: true,
+      closingDay: matchedCard!.closingDay,
     });
 
     const created = expenses.map(mapExpense);
@@ -251,6 +253,11 @@ router.post('/', async (req: AuthedRequest, res) => {
     });
   }
 
+  const invoiceMonth =
+    parsed.paymentMethod === 'CREDIT' && matchedCard?.closingDay
+      ? getInvoiceMonthForPurchase(parsed.date, matchedCard.closingDay)
+      : dayjs(parsed.date).tz(TZ).format('YYYY-MM');
+
   const expense = await prisma.expense.create({
     data: {
       userId: user.id,
@@ -263,7 +270,10 @@ router.post('/', async (req: AuthedRequest, res) => {
       source: 'pwa-quick',
       rawText: parsed.rawText,
       purchaseLabel: parsed.purchaseLabel ?? parsed.description,
-      postedMonth: dayjs(parsed.date).tz(TZ).format('YYYY-MM'),
+      postedMonth: invoiceMonth,
+      invoiceMonth,
+      installmentIndex: 1,
+      installmentsTotal: parsed.installmentsTotal ?? 1,
       installmentCurrent: parsed.installmentCurrent ?? null,
       installmentTotal: parsed.installmentTotal ?? null,
     },

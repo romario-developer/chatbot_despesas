@@ -1,7 +1,11 @@
 import { prisma } from '../db/prisma';
-import { dayjs, TZ } from '../utils/dates';
 import { PaymentMethod } from '../utils/paymentMethod';
 import { CARD_SELECT } from './cardService';
+import {
+  splitInstallmentAmounts,
+  getInvoiceMonthForPurchase,
+  monthStartFromInvoiceMonth,
+} from '../utils/installments';
 
 type CreateInstallmentOptions = {
   userId: number;
@@ -16,15 +20,8 @@ type CreateInstallmentOptions = {
   paymentMethod: PaymentMethod;
   installmentsTotal: number;
   appendInstallmentLabel?: boolean;
+  closingDay: number;
 };
-
-const DEFAULT_SOURCE = 'manual';
-
-function buildInstallmentDate(base: ReturnType<typeof dayjs>, offset: number) {
-  const candidate = base.add(offset, 'month');
-  const desired = Math.min(base.date(), candidate.endOf('month').date());
-  return candidate.date(desired).startOf('day');
-}
 
 export interface CreateInstallmentResult {
   groupId: string;
@@ -45,13 +42,11 @@ export async function createInstallmentExpenses(options: CreateInstallmentOption
     paymentMethod,
     installmentsTotal,
     appendInstallmentLabel = false,
+    closingDay,
   } = options;
-  const baseDate = dayjs(date).tz(TZ);
-  const baseAmount = Math.floor(amountCents / installmentsTotal);
-  const remainder = amountCents - baseAmount * installmentsTotal;
-  const amounts = Array.from({ length: installmentsTotal }, (_, index) =>
-    index === installmentsTotal - 1 ? baseAmount + remainder : baseAmount,
-  );
+  const baseInvoiceMonth = getInvoiceMonthForPurchase(date, closingDay);
+  const baseMonthDate = monthStartFromInvoiceMonth(baseInvoiceMonth);
+  const amounts = splitInstallmentAmounts(amountCents, installmentsTotal);
 
   const group = await prisma.installmentGroup.create({
     data: {
@@ -65,7 +60,8 @@ export async function createInstallmentExpenses(options: CreateInstallmentOption
 
   const expenses = await prisma.$transaction(
     amounts.map((installmentAmount, index) => {
-      const installmentDate = buildInstallmentDate(baseDate, index);
+      const installmentMonthDate = baseMonthDate.add(index, 'month');
+      const installmentMonth = installmentMonthDate.format('YYYY-MM');
       const descriptionSuffix = appendInstallmentLabel
         ? ` (${index + 1}/${installmentsTotal})`
         : '';
@@ -77,8 +73,8 @@ export async function createInstallmentExpenses(options: CreateInstallmentOption
           paymentMethod,
           amountCents: installmentAmount,
           description: `${description}${descriptionSuffix}`,
-          date: installmentDate.toDate(),
-          source: options.source ?? DEFAULT_SOURCE,
+          date: installmentMonthDate.toDate(),
+          source: options.source ?? 'manual',
           rawText,
           installmentGroupId: group.id,
           installmentIndex: index + 1,
@@ -86,7 +82,8 @@ export async function createInstallmentExpenses(options: CreateInstallmentOption
           installmentCurrent: index + 1,
           installmentTotal: installmentsTotal,
           purchaseLabel,
-          postedMonth: installmentDate.format('YYYY-MM'),
+          postedMonth: installmentMonth,
+          invoiceMonth: installmentMonth,
         },
         include: { category: true, card: { select: CARD_SELECT } },
       });

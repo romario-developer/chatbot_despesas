@@ -20,6 +20,7 @@ export type PendingExpenseDraft = {
   cardId?: number;
   date?: Date;
   categoryName?: string;
+  installmentsTotal?: number;
 };
 
 function hydrateDraft(raw: unknown): PendingExpenseDraft {
@@ -32,6 +33,8 @@ function hydrateDraft(raw: unknown): PendingExpenseDraft {
     cardId: typeof payload?.cardId === 'number' ? payload.cardId : undefined,
     date: payload?.date ? new Date(payload.date) : undefined,
     categoryName: typeof payload?.categoryName === 'string' ? payload.categoryName : undefined,
+    installmentsTotal:
+      typeof payload?.installmentsTotal === 'number' ? payload.installmentsTotal : undefined,
   };
 }
 
@@ -43,6 +46,7 @@ function prepareDraftForStorage(draft: PendingExpenseDraft) {
   if (typeof draft.cardId === 'number') payload.cardId = draft.cardId;
   if (draft.date) payload.date = draft.date.toISOString();
   if (draft.categoryName) payload.categoryName = draft.categoryName;
+  if (typeof draft.installmentsTotal === 'number') payload.installmentsTotal = draft.installmentsTotal;
   return payload;
 }
 

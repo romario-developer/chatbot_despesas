@@ -136,6 +136,7 @@ model Expense {
   installmentTotal   Int?
   purchaseLabel      String?
   postedMonth        String?
+  invoiceMonth       String?
   createdAt     DateTime      @default(now())
   installmentGroupId String?
   installmentIndex   Int  @default(1)
@@ -153,6 +154,9 @@ model Expense {
   @@index([userId, cardId, date])
   @@index([date])
   @@index([installmentGroupId])
+  @@index([userId, invoiceMonth])
+  @@index([cardId, invoiceMonth])
+  @@index([userId, cardId, invoiceMonth])
 }
 
 model ExpenseDraft {

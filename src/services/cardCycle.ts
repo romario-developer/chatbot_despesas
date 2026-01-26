@@ -55,3 +55,12 @@ export function getOpenCycle(
   const cycle = getCardCycleRange(referenceDate, card.closingDay);
   return buildCyclePeriod(card, cycle, tz);
 }
+
+export function getCycleMonthForDate(
+  date: Date,
+  closingDay: number,
+  tz: string = TZ,
+): string {
+  const cycle = getCardCycleRange(date, closingDay);
+  return dayjs.tz(cycle.endDate, 'YYYY-MM-DD', tz).format('YYYY-MM');
+}

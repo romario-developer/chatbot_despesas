@@ -7,6 +7,8 @@ export const CARD_SELECT = {
   name: true,
   brand: true,
   color: true,
+  closingDay: true,
+  dueDay: true,
 } as const;
 
 export type CardSummary = Prisma.CardGetPayload<{ select: typeof CARD_SELECT }>;

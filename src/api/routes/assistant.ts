@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { AuthedRequest } from '../middleware/auth';
 import { createExpense, deleteExpense } from '../../services/expenseService';
+import { ensureDefaultCategory, getOrCreateCategory } from '../../services/categoryService';
 import {
   AssistantStage,
   getAssistantConversationState,
@@ -13,8 +14,10 @@ import {
 } from '../../services/assistantConversationService';
 import { parseExpenseMessage } from '../../services/assistantExpenseParser';
 import { formatCurrency } from '../../utils/money';
-import { nowBahia, normalizeDateOnly } from '../../utils/dates';
+import { dayjs, nowBahia, normalizeDateOnly, TZ } from '../../utils/dates';
 import { findCardByIdForUser, listCardsForUser } from '../../services/cardService';
+import { createInstallmentExpenses } from '../../services/installmentService';
+import { getInvoiceMonthForPurchase } from '../../utils/installments';
 
 const router = Router();
 
@@ -71,6 +74,9 @@ function buildDraftResponse(draft: PendingExpenseDraft) {
   if (draft.categoryName) {
     result.categoryName = draft.categoryName;
   }
+  if (typeof draft.installmentsTotal === 'number') {
+    result.installmentsTotal = draft.installmentsTotal;
+  }
   return Object.keys(result).length ? result : undefined;
 }
 
@@ -118,14 +124,15 @@ function mergeDraft(existing: PendingExpenseDraft, parsed: Partial<PendingExpens
     cardId: parsed.cardId ?? existing.cardId,
     date: parsed.date ?? existing.date,
     categoryName: parsed.categoryName ?? existing.categoryName,
+    installmentsTotal: parsed.installmentsTotal ?? existing.installmentsTotal,
   };
 }
 
 function determineMissingField(draft: PendingExpenseDraft): PendingQuestion | null {
   if (!draft.description) return 'description';
   if (!draft.amountCents || draft.amountCents <= 0) return 'amount';
-  if (!draft.paymentMethod) return 'paymentMethod';
   if (draft.paymentMethod === 'CREDIT' && !draft.cardId) return 'card';
+  if (!draft.paymentMethod) return 'paymentMethod';
   return null;
 }
 
@@ -238,7 +245,12 @@ router.post('/chat', async (req: AuthedRequest, res) => {
   }
 
   const isFreshConversation = shouldResetConversation(state?.stage);
-  const draftBase: PendingExpenseDraft = isFreshConversation ? {} : state?.pendingExpenseDraft ?? {};
+  const clearedDraft: PendingExpenseDraft = {
+    amountCents: undefined,
+    cardId: undefined,
+    installmentsTotal: undefined,
+  };
+  const draftBase: PendingExpenseDraft = isFreshConversation ? clearedDraft : state?.pendingExpenseDraft ?? {};
   const lastExpenseId = state?.lastExpenseId ?? null;
   let fallbackStage: AssistantStage = state?.stage ?? 'idle';
   let fallbackDraft: PendingExpenseDraft | undefined = state?.pendingExpenseDraft;
@@ -293,16 +305,60 @@ router.post('/chat', async (req: AuthedRequest, res) => {
     }
     const categoryName = mergedDraft.categoryName ?? 'Outros';
     const card = mergedDraft.cardId ? await findCardByIdForUser(userId, mergedDraft.cardId) : null;
+    const requestedInstallments = mergedDraft.installmentsTotal ?? 1;
+    const normalizedInstallments = Math.min(Math.max(requestedInstallments, 1), 36);
+    const shouldCreateInstallments =
+      paymentMethod === 'CREDIT' && card && normalizedInstallments > 1;
 
-    const created = await createExpense(userId, {
-      amountCents: amount,
-      description: finalDescription,
-      categoryName,
-      date,
-      rawText: message,
-      paymentMethod,
-      cardId: mergedDraft.cardId ?? undefined,
-    });
+    let lastSavedExpenseId: number;
+    const paymentSummaryLabel =
+      paymentMethod === 'CREDIT' ? `Crédito ${card?.name ?? 'cartão'}` : getPaymentLabel(paymentMethod);
+    let summary: string;
+
+    if (shouldCreateInstallments) {
+      await ensureDefaultCategory(userId);
+      const category = await getOrCreateCategory(userId, categoryName);
+      const { expenses } = await createInstallmentExpenses({
+        userId,
+        cardId: card!.id,
+        categoryId: category.id,
+        description: finalDescription,
+        amountCents: amount,
+        date,
+        rawText: message,
+        purchaseLabel: finalDescription,
+        paymentMethod,
+        source: 'assistant',
+        installmentsTotal: normalizedInstallments,
+        appendInstallmentLabel: true,
+        closingDay: card!.closingDay,
+      });
+      lastSavedExpenseId = expenses[0].id;
+      summary = `${finalDescription} — ${formatCurrency(amount)} em ${normalizedInstallments}x (${paymentSummaryLabel})`;
+    } else {
+      const invoiceMonth =
+        paymentMethod === 'CREDIT' && card
+          ? getInvoiceMonthForPurchase(date, card.closingDay)
+          : dayjs(date).tz(TZ).format('YYYY-MM');
+      const created = await createExpense(userId, {
+        amountCents: amount,
+        description: finalDescription,
+        categoryName,
+        date,
+        rawText: message,
+        paymentMethod,
+        cardId: mergedDraft.cardId ?? undefined,
+        installmentsTotal: 1,
+        installmentIndex: 1,
+        installmentCurrent: 1,
+        installmentTotal: 1,
+        invoiceMonth,
+        postedMonth: invoiceMonth,
+        source: 'assistant',
+      });
+      lastSavedExpenseId = created.expense.id;
+      summary = `${finalDescription} — ${formatCurrency(amount)} (${paymentSummaryLabel})`;
+    }
 
     const savedStage: AssistantStage = 'saved';
     await upsertAssistantConversationState({
@@ -310,11 +366,9 @@ router.post('/chat', async (req: AuthedRequest, res) => {
       userId,
       pendingExpenseDraft: {},
       stage: savedStage,
-      lastExpenseId: created.expense.id,
+      lastExpenseId: lastSavedExpenseId,
     });
 
-    const paymentSummaryLabel = paymentMethod === 'CREDIT' ? `Crédito ${card?.name ?? 'cartão'}` : getPaymentLabel(paymentMethod);
-    const summary = `${finalDescription} — ${formatCurrency(amount)} (${paymentSummaryLabel})`;
     const assistantMessage = 'Registrado.';
     logStage(userId, savedStage);
 
