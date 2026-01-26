@@ -1,7 +1,7 @@
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
 
-import { getOrCreateUser } from '../../services/userService';
+import { findUserBySubject } from '../../services/userService';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -19,6 +19,8 @@ export interface AuthedRequest extends Request {
     id: number;
     telegramId: string | null;
     telegramChatId?: string | null;
+    email?: string | null;
+    name?: string | null;
   };
 }
 
@@ -36,8 +38,7 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const userIdentifier = sub;
-    const user = await getOrCreateUser(userIdentifier);
+    const user = await findUserBySubject(sub);
     if (!user || !Number.isInteger(user.id) || user.id <= 0) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -46,7 +47,9 @@ export async function authMiddleware(req: AuthedRequest, res: Response, next: Ne
     req.user = {
       id: user.id,
       telegramId: user.telegramId ?? null,
-      telegramChatId: user.telegramChatId,
+      telegramChatId: user.telegramChatId ?? null,
+      email: user.email ?? null,
+      name: user.name ?? null,
     };
 
     next();
