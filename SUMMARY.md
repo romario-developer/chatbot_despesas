@@ -44,6 +44,6 @@
 - Prisma: `npm run prisma:migrate`, `prisma:migrate:deploy`, `prisma:studio`
 
 ## Observação
-- Arquivo atualizado temporariamente para registrar alteração e permitir o push solicitado.
+- Arquivo atualizado temporariamente para registrar alteração e permitir o push solicitado. V2
 
 
