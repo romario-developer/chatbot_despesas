@@ -143,6 +143,11 @@ curl -H "Authorization: Bearer $TOKEN" \
 - A API faz `PUT` via GitHub Contents API, criando o arquivo se não existir ou atualizando quando o SHA já existe. A mensagem de commit segue `backup(user): <userId> <YYYY-MM-DD HH:mm>` usando o fuso `America/Bahia`.
 - Dados sensíveis não são logados; falhas em um usuário não interrompem os demais e são reportadas no resumo da chamada.
 
+## Backup import/export do usuário
+
+- O frontend pode baixar os dados do usuário logado (sem senha/hash) em `GET /api/user/backup/export` (exige Bearer token válido).
+- Restaure um backup com `POST /api/user/backup/import`, enviando exatamente o JSON retornado pelo export. O endpoint valida `meta.userId` e sobrescreve os dados do usuário em uma transaction segura.
+
 ## Render Cron Job sugerido
 
 - Crie um cron job no Render para rodar diariamente (ex.: 03:00 UTC) e acionar o backup por usuário:

@@ -8,6 +8,7 @@ import healthRouter from './routes/health';
 import './utils/dates';
 import { markDbError, markDbReady } from './infra/db/dbState';
 import { prisma } from './infra/db/prisma';
+import userBackupRouter from './routes/userBackup';
 
 dotenv.config();
 process.env.TZ = 'America/Fortaleza';
@@ -55,6 +56,7 @@ const corsOptions = {
 const corsMiddleware = cors(corsOptions);
 app.use(corsMiddleware);
 app.use(express.json());
+app.use(`${API_BASE_PATH}/user/backup`, userBackupRouter);
 app.use(API_BASE_PATH, healthRouter);
 app.use(API_BASE_PATH, apiRouter);
 
