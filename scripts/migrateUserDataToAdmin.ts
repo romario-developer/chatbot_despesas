@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 import { normalizeCategoryName } from "../src/utils/normalize";
 import { getAdminUser } from "../src/services/userService";
 

@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 import { runBackup } from "../src/services/backupService";
 
 async function main() {

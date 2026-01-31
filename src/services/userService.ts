@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 import { ADMIN_TELEGRAM_ID } from '../utils/systemUsers';
 import { normalizeEmail } from '../utils/email';
 

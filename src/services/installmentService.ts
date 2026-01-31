@@ -1,4 +1,4 @@
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 import { PaymentMethod } from '../utils/paymentMethod';
 import { CARD_SELECT } from './cardService';
 import {

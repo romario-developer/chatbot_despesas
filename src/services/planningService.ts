@@ -1,4 +1,4 @@
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 
 export type PlanningData = {
   salaryByMonth: Record<string, number>;

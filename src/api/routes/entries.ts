@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 
-import { prisma } from "../../db/prisma";
+import { prisma } from "../../infra/db/prisma";
 import { ensureDefaultCategory, getOrCreateCategory } from "../../services/categoryService";
 import { classifyCategoryByText, learnCategoryMemory } from "../../services/categoryClassifier";
 import { dayjs, TZ, normalizeDateOnly } from "../../utils/dates";

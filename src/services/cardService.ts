@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 
 export const CARD_SELECT = {
   id: true,

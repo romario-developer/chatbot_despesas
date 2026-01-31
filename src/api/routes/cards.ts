@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { centsToNumber, toAmountCents } from '../../utils/money';
 import { parseFromToQuery } from '../../utils/dateRange';

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-import { prisma } from "../db/prisma";
+import { prisma } from "../infra/db/prisma";
 import { getMonthlySummary } from "./monthlySummaryService";
 import { getPlanningByUserId } from "./planningService";
 import { getMonthRangeFromIsoMonth } from "../utils/dateRange";

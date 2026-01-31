@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { centsToNumber, toAmountCents } from '../../utils/money';
 import { cardToDto, logCardDebug } from '../../utils/cardDto';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';

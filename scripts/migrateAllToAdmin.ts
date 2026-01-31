@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 import { getAdminUser } from "../src/services/userService";
 
 type TableName = "expense" | "expenseDraft" | "planning" | "userSession" | "telegramLinkCode";

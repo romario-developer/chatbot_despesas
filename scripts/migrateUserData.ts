@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 import { getOrCreateUser } from "../src/services/userService";
 import { normalizeCategoryName } from "../src/utils/normalize";
 import { API_TELEGRAM_ID } from "../src/utils/systemUsers";

@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 
 async function columnExists(table: string, column: string) {
   const result = await prisma.$queryRaw<{ exists: boolean }[]>`

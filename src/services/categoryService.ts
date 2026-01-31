@@ -1,4 +1,4 @@
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 import type { Category } from '@prisma/client';
 import { normalizeCategoryName } from '../utils/normalize';
 

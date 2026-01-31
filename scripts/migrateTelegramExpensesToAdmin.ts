@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 import { ADMIN_TELEGRAM_ID } from "../src/utils/systemUsers";
 import { getMonthRangeTZ } from "../src/utils/dateRange";
 import { TZ } from "../src/utils/dates";

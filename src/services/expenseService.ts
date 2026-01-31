@@ -1,6 +1,6 @@
 import type { PaymentMethod } from '@prisma/client';
 
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory } from './categoryService';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 import { dayjs, TZ } from '../utils/dates';

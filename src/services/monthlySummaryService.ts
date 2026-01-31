@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "../db/prisma";
+import { prisma } from "../infra/db/prisma";
 import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
 import { getMonthRangeFromIsoMonth } from "../utils/dateRange";

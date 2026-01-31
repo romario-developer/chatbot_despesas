@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { getAdminUser } from '../../services/userService';
 import { ADMIN_TELEGRAM_ID } from '../../utils/systemUsers';
 import { normalizeEmail } from '../../utils/email';

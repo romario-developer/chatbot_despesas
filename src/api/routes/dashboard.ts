@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { getPlanningByUserId } from '../../services/planningService';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { getMonthRangeFromMonthYear } from '../../utils/dateRange';

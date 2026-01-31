@@ -17,18 +17,17 @@ import quickEntryRoutes from './routes/quickEntry';
 import reportsRoutes from './routes/reports';
 import summaryRoutes from './routes/summary';
 import aiRoutes from './routes/ai';
+import requireDb from '../middlewares/requireDb';
 
 export const API_BASE_PATH = '/api';
 const router = Router();
-
-router.get('/health', (_req, res) => {
-  return res.json({ ok: true, ts: new Date().toISOString() });
-});
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
 
 router.use(authMiddleware);
+router.use(requireDb);
+
 router.use('/assistant', assistantRoutes);
 router.use('/ai', aiRoutes);
 router.use(noCacheMiddleware);

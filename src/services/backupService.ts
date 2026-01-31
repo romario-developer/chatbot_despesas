@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { prisma } from "../db/prisma";
+import { prisma } from "../infra/db/prisma";
 
 type BackupCounts = {
   users: number;

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { getPlanningByUserId, upsertPlanning } from '../../services/planningService';
 import { normalizeCategoryName } from '../../utils/normalize';
 import { dayjs, TZ } from '../../utils/dates';

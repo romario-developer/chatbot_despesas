@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 
 type BackupData = {
   users?: any[];

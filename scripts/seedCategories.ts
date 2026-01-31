@@ -1,4 +1,4 @@
-import { prisma } from '../src/db/prisma';
+import { prisma } from '../src/infra/db/prisma';
 import { normalizeCategoryName } from '../src/utils/normalize';
 
 const DEFAULT_CATEGORIES = ['Outros', 'Alimentação', 'Transporte', 'Saúde', 'Casa'];

@@ -1,4 +1,4 @@
-import { prisma } from "../src/db/prisma";
+import { prisma } from "../src/infra/db/prisma";
 
 async function main() {
   if (process.env.NODE_ENV === "production" && process.env.RESET_CONFIRM !== "YES") {

@@ -1,7 +1,7 @@
 import type { PaymentMethod } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 
 export type PendingQuestion = 'none' | 'amount' | 'description' | 'paymentMethod' | 'card';
 export type AssistantStage =

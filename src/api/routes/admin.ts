@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { prisma } from "../../db/prisma";
+import { prisma } from "../../infra/db/prisma";
 import { runBackup } from "../../services/backupService";
 import { getOrCreateUser, getAdminUser } from "../../services/userService";
 import { dayjs, TZ } from "../../utils/dates";

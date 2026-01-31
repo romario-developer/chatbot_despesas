@@ -1,6 +1,6 @@
 import type { CategoryMemory } from '@prisma/client';
 
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 
 const RULE_CACHE_TTL_MS = 5 * 60 * 1000;
 

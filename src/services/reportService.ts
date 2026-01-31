@@ -1,4 +1,4 @@
-import { prisma } from '../db/prisma';
+import { prisma } from '../infra/db/prisma';
 import { getMonthRangeFromMonthYear } from '../utils/dateRange';
 import { assertValidAmountCents } from '../utils/money';
 

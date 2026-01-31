@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { prisma } from '../../db/prisma';
+import { prisma } from '../../infra/db/prisma';
 import { ensureDefaultCategory, getOrCreateCategory, listCategories } from '../../services/categoryService';
 import {
   parseQuickEntryText,
