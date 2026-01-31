@@ -6,19 +6,15 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-
     "prebuild": "prisma generate",
     "build": "tsc -p tsconfig.json",
-
     "start": "node dist/src/index.js",
-
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
-
     "test": "echo \"No tests configured\" && exit 0",
-
     "db:backup": "tsx scripts/db-backup.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:restore": "tsx scripts/db-restore.ts",
@@ -36,6 +32,7 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.19.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",

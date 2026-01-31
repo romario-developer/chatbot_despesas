@@ -9,7 +9,11 @@ Backend API em Node.js/TypeScript usado exclusivamente pela PWA do Chat Despesas
 
 ## Variáveis de ambiente
 - `DATABASE_URL`: URL do Postgres (ex.: `postgresql://user:pass@host:5432/db`).
-- `ADMIN_PASSWORD`: senha única para login na API.
+- `ADMIN_EMAIL`: email do administrador que será criado pelo seed.
+- `ADMIN_PASSWORD`: senha única para login na API e para o usuário admin do seed.
+- `ADMIN_NAME`: nome exibido do admin (opcional; padrão `Admin`).
+- `ADMIN_ROLE`: papel utilizado pelo seed apenas para fins de log (opcional; padrão `admin`).
+- `BCRYPT_ROUNDS`: custo do hash bcrypt (opcional; padrão `10`).
 - `JWT_SECRET`: segredo para assinar os JWTs da API.
 - `PWA_ORIGIN`: origem permitida para CORS (ex.: `https://despesas-pwa.onrender.com`).
 - `PORT`: porta HTTP (padrão 3000).
@@ -37,6 +41,15 @@ Backend API em Node.js/TypeScript usado exclusivamente pela PWA do Chat Despesas
    - Desenvolvimento: `npm run dev`
    - Produção: `npm run build && npm start`
    - Healthcheck: `GET /health`
+
+## Seed do admin
+
+- Defina `ADMIN_EMAIL` e `ADMIN_PASSWORD` (e opcionalmente `ADMIN_NAME`, `ADMIN_ROLE`, `BCRYPT_ROUNDS`) no `.env` ou no ambiente.
+- Execute:
+  ```bash
+  npx prisma db seed
+  ```
+- O seed usa `tsx prisma/seed.ts` e garante que o usuário admin com `telegramId` igual a `admin` exista sem duplicar.
 
 ## API REST (/api)
 - Autenticação: Bearer token (JWT). Obtenha via `POST /api/auth/login` enviando `{ "password": "<ADMIN_PASSWORD>" }`. Token expira em 7 dias.
