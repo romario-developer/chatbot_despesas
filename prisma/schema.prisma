@@ -253,3 +253,23 @@ model Credit {
   @@index([userId, createdAt])
   @@index([userId, updatedAt])
 }
+
+enum BackupAction {
+  CREATE @map("create")
+  UPDATE @map("update")
+  DELETE @map("delete")
+}
+
+model BackupEvent {
+  id        String       @id @default(cuid())
+  userId    String
+  entity    String
+  action    BackupAction
+  entityId  String?
+  payload   Json
+  createdAt DateTime     @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

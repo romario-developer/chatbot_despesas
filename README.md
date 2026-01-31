@@ -125,6 +125,22 @@ curl -H "Authorization: Bearer $TOKEN" \
   ```
 - O backup inclui usuários, categorias, despesas, rascunhos, planejamento, sessoes e eventuais códigos legados.
 
+## Backup incremental e export snapshot
+
+- O backend registra cada criação, atualização e exclusão de `Expense` em uma tabela `BackupEvent`, incluindo o estado antes/depois dos campos alterados (sem duplicar dados). Isso facilita auditoria e rastreamento de alterações.
+- O endpoint `GET /api/admin/backup/export` retorna um snapshot completo (usuarios, categorias, cartões, faturas, despesas, etc.) com filtros opcionais `month=YYYY-MM`, `from=YYYY-MM-DD`, `to=YYYY-MM-DD`. Requer `Authorization: Bearer $ADMIN_TOKEN` ou `x-admin-token`.
+- O endpoint `GET /api/admin/backup/entries.csv` exporta apenas as despesas (mesmo filtros).
+- Para rodar localmente, use o CLI: `npm run backup:export -- --month=2026-01` (ou `--from=2025-12-01 --to=2025-12-31`). O JSON será salvo em `backups/`.
+
+## Render Cron Job sugerido
+
+- Crie um cron job no Render que execute o export diariamente em UTC:
+  ```bash
+  curl -H "Authorization: Bearer $ADMIN_TOKEN" "https://chatbot-despesas.onrender.com/api/admin/backup/export?month=$(date -u +%Y-%m)" > backup-$(date -u +%Y-%m-%d).json
+  ```
+- Como a filesystem do Render é efêmera, envie o arquivo para um storage externo (S3/R2/Google Drive) logo em seguida; o cron job pode chamar `aws s3 cp` ou `rclone` para isso.
+- Atenção: cron jobs do Render rodam em UTC, então converta datas (`$(date -u ...)`) se quiser o mês local, e use variáveis para o `ADMIN_TOKEN`.
+
 ## Notas
 - Fuso horário fixo: `America/Bahia` para parsing e formatação.
 - Categorias, cartões e créditos são separados por usuário (a API gera/usa um usuário interno `api-admin` para lançamentos manuais quando necessário).

@@ -16,6 +16,7 @@
     "prisma:studio": "prisma studio",
     "test": "echo \"No tests configured\" && exit 0",
     "db:backup": "tsx scripts/db-backup.ts",
+    "backup:export": "tsx scripts/exportBackup.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:restore": "tsx scripts/db-restore.ts",
     "seed:categories": "tsx scripts/seedCategories.ts",

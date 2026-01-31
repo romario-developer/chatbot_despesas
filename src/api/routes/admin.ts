@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { prisma } from "../../infra/db/prisma";
-import { runBackup } from "../../services/backupService";
+import { runBackup, exportSnapshot, type BackupFilters } from "../../services/backupService";
 import { getOrCreateUser, getAdminUser } from "../../services/userService";
 import { dayjs, TZ } from "../../utils/dates";
 import { getMonthRangeFromMonthYear } from "../../utils/dateRange";
@@ -43,6 +43,20 @@ function requireAdminSecret(req: any, res: any) {
     return false;
   }
   return true;
+}
+
+function buildBackupFilters(req: any): BackupFilters {
+  return {
+    month: typeof req.query.month === "string" ? req.query.month.trim() : undefined,
+    from: typeof req.query.from === "string" ? req.query.from.trim() : undefined,
+    to: typeof req.query.to === "string" ? req.query.to.trim() : undefined,
+  };
+}
+
+function buildPeriodLabel(filters: BackupFilters) {
+  if (filters.month) return filters.month;
+  if (filters.from && filters.to) return `${filters.from}_to_${filters.to}`;
+  return filters.from || filters.to || "all";
 }
 
 router.post("/users", async (req, res) => {
@@ -101,6 +115,19 @@ router.get("/backup", async (req, res) => {
   } catch (err) {
     console.error("[admin][backup] falhou:", err);
     return res.status(500).json({ error: "Falha ao gerar backup" });
+  }
+});
+
+router.get("/backup/export", async (req, res) => {
+  if (!requireAdminToken(req, res)) return;
+  try {
+    const filters = buildBackupFilters(req);
+    const snapshot = await exportSnapshot(filters);
+    return res.json(snapshot);
+  } catch (err) {
+    console.error("[admin][backup/export] falhou:", err);
+    const message = err instanceof Error ? err.message : "Falha ao processar filtros";
+    return res.status(400).json({ error: message });
   }
 });
 
@@ -171,6 +198,33 @@ router.get("/exports/expenses.csv", async (req, res) => {
   } catch (err) {
     console.error("[admin][exports/expenses.csv] erro:", err);
     return res.status(500).json({ error: "Falha ao exportar despesas" });
+  }
+});
+
+router.get("/backup/entries.csv", async (req, res) => {
+  if (!requireAdminToken(req, res)) return;
+  try {
+    const filters = buildBackupFilters(req);
+    const snapshot = await exportSnapshot(filters);
+    const entries = snapshot.data.expenses;
+    const periodLabel = buildPeriodLabel(filters);
+    const header = "date,description,category,amount,source";
+    const lines = entries.map((e) => {
+      const date = e.date.toISOString().slice(0, 10);
+      const description = (e.description || "").replace(/"/g, '""');
+      const category = (e.category?.name || "").replace(/"/g, '""');
+      const amount = ((e.amountCents ?? 0) / 100).toFixed(2);
+      const src = (e.source || "").replace(/"/g, '""');
+      return `${date},"${description}","${category}",${amount},${src}`;
+    });
+    const csv = [header, ...lines].join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="backup_entries_${periodLabel}.csv"`);
+    return res.status(200).send(csv);
+  } catch (err) {
+    console.error("[admin][backup/entries.csv] erro:", err);
+    const message = err instanceof Error ? err.message : "Falha ao exportar despesas";
+    return res.status(500).json({ error: message });
   }
 });
 
