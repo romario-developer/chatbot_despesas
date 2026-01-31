@@ -18,6 +18,11 @@ Backend API em Node.js/TypeScript usado exclusivamente pela PWA do Chat Despesas
 - `PWA_ORIGIN`: origem permitida para CORS (ex.: `https://despesas-pwa.onrender.com`).
 - `PORT`: porta HTTP (padrão 3000).
 - `NODE_ENV`: `development` ou `production`.
+- `GITHUB_BACKUP_TOKEN`: token com permissão `repo:contents` para o repositório de backups.
+- `GITHUB_BACKUP_REPO`: repositório privado onde os JSONs serão salvos (ex.: `user/backup-repo`).
+- `GITHUB_BACKUP_BRANCH`: branch alvo para commits (`main` por padrão).
+- `BACKUP_CRON_SECRET`: segredo compartilhado usado pelo cron interno (`x-backup-secret`).
+- `APP_ENV`: informa o ambiente (`production`/`development`) gravado nos metadados do backup.
 
 ## Configuração rápida
 1. Instale dependências:
@@ -132,14 +137,22 @@ curl -H "Authorization: Bearer $TOKEN" \
 - O endpoint `GET /api/admin/backup/entries.csv` exporta apenas as despesas (mesmo filtros).
 - Para rodar localmente, use o CLI: `npm run backup:export -- --month=2026-01` (ou `--from=2025-12-01 --to=2025-12-31`). O JSON será salvo em `backups/`.
 
+## Backup automático por usuário no GitHub
+
+- `POST /api/internal/backup/run` dispara o processo e exige `x-backup-secret: $BACKUP_CRON_SECRET`. Ele coleta todos os dados do usuário (categorias, cartões, despesas, drafts, planejamento etc.), empacota em um JSON com `meta`/`data` e manda para o arquivo `/backups/users/<userId>.json` no repositório privado configurado pelas variáveis `GITHUB_BACKUP_*`.
+- A API faz `PUT` via GitHub Contents API, criando o arquivo se não existir ou atualizando quando o SHA já existe. A mensagem de commit segue `backup(user): <userId> <YYYY-MM-DD HH:mm>` usando o fuso `America/Bahia`.
+- Dados sensíveis não são logados; falhas em um usuário não interrompem os demais e são reportadas no resumo da chamada.
+
 ## Render Cron Job sugerido
 
-- Crie um cron job no Render que execute o export diariamente em UTC:
+- Crie um cron job no Render para rodar diariamente (ex.: 03:00 UTC) e acionar o backup por usuário:
   ```bash
-  curl -H "Authorization: Bearer $ADMIN_TOKEN" "https://chatbot-despesas.onrender.com/api/admin/backup/export?month=$(date -u +%Y-%m)" > backup-$(date -u +%Y-%m-%d).json
+  curl -X POST https://chatbot-despesas.onrender.com/api/internal/backup/run \
+    -H "x-backup-secret: $BACKUP_CRON_SECRET"
   ```
-- Como a filesystem do Render é efêmera, envie o arquivo para um storage externo (S3/R2/Google Drive) logo em seguida; o cron job pode chamar `aws s3 cp` ou `rclone` para isso.
-- Atenção: cron jobs do Render rodam em UTC, então converta datas (`$(date -u ...)`) se quiser o mês local, e use variáveis para o `ADMIN_TOKEN`.
+- Esse endpoint dispara a coleta por usuário e empacota os JSONs diretamente no repositório privado configurado via `GITHUB_BACKUP_*`, portanto não depende do sistema de arquivos do Render.
+- Use comandos adicionais (`aws s3 cp`, `rclone`, etc.) dentro do cron job para copiar logs/resultados para um storage externo se quiser ter outra cópia e alertar falhas.
+- Atenção: cron jobs no Render rodam em UTC; use `date -u` se quiser inspecionar datas locais e mantenha o segredo em variáveis protegidas.
 
 ## Notas
 - Fuso horário fixo: `America/Bahia` para parsing e formatação.

@@ -18,12 +18,14 @@ import reportsRoutes from './routes/reports';
 import summaryRoutes from './routes/summary';
 import aiRoutes from './routes/ai';
 import requireDb from '../middlewares/requireDb';
+import internalRoutes from './routes/internal';
 
 export const API_BASE_PATH = '/api';
 const router = Router();
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
+router.use('/internal', internalRoutes);
 
 router.use(authMiddleware);
 router.use(requireDb);
