@@ -3,7 +3,7 @@ import type { PaymentMethod } from '@prisma/client';
 import { classifyCategoryByText } from './categoryClassifier';
 import { findCategoryById } from './categoryService';
 import { findCardByNameGuess } from './cardService';
-import { amountStringToCents } from '../utils/money';
+import { parsePtBrMoneyToCents } from '../utils/money';
 import { dayjs, normalizeDateOnly, nowBahia, TZ } from '../utils/dates';
 
 const PAYMENT_METHOD_PATTERNS: Array<{ method: PaymentMethod; keywords: string[] }> = [
@@ -68,7 +68,7 @@ function extractAmount(text: string) {
   const match = text.match(/(?:r\$)?\s*\d+(?:[\.,]\d{1,2})?/i);
   if (!match) return null;
   const value = match[0].trim();
-  const cents = amountStringToCents(value);
+  const cents = parsePtBrMoneyToCents(value);
   if (cents === null || cents <= 0) return null;
   return { amountCents: cents, matchedText: value };
 }

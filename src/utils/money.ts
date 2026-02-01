@@ -1,30 +1,36 @@
-export function amountStringToNumber(raw: string): number | null {
-  const cleaned = raw
-    .toLowerCase()
-    .replace(/r\$\s*/g, '')
+export function parsePtBrMoneyToCents(value: string | number): number | null {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * 100);
+  }
+
+  if (typeof value !== 'string') return null;
+  let normalized = value
+    .replace(/R\$/gi, '')
     .replace(/\s+/g, '');
 
-  if (!cleaned) return null;
+  if (!normalized) return null;
 
-  let normalized = cleaned;
   const hasComma = normalized.includes(',');
   const hasDot = normalized.includes('.');
 
-  if (hasComma && hasDot) {
+  if (hasComma) {
     normalized = normalized.replace(/\./g, '').replace(',', '.');
-  } else if (hasComma) {
-    normalized = normalized.replace(',', '.');
   }
 
   const amount = Number.parseFloat(normalized);
-  if (Number.isNaN(amount)) return null;
-  return Number(amount.toFixed(2));
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount * 100);
+}
+
+export function amountStringToNumber(raw: string): number | null {
+  const cents = parsePtBrMoneyToCents(raw);
+  if (cents === null) return null;
+  return Number((cents / 100).toFixed(2));
 }
 
 export function amountStringToCents(raw: string): number | null {
-  const amount = amountStringToNumber(raw);
-  if (amount === null) return null;
-  return Math.round(amount * 100);
+  return parsePtBrMoneyToCents(raw);
 }
 
 export function toAmountCents(amount: unknown): number | null {
@@ -34,7 +40,7 @@ export function toAmountCents(amount: unknown): number | null {
   }
 
   if (typeof amount === 'string') {
-    return amountStringToCents(amount);
+    return parsePtBrMoneyToCents(amount);
   }
 
   return null;

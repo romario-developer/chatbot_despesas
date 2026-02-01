@@ -1,4 +1,4 @@
-import { amountStringToCents } from '../utils/money';
+import { parsePtBrMoneyToCents } from '../utils/money';
 import { dayjs } from '../utils/dates';
 
 const MONTH_ALIASES: Record<string, number> = {
@@ -76,7 +76,7 @@ function detectAmount(text: string): { amountCents: number; cleaned: string } | 
   const matches = Array.from(text.matchAll(regex));
   const match = matches.pop();
   if (!match) return null;
-  const amount = amountStringToCents(match[0]);
+  const amount = parsePtBrMoneyToCents(match[0]);
   if (!amount || amount <= 0) return null;
   return {
     amountCents: amount,
