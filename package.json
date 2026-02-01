@@ -14,7 +14,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
-    "test": "echo \"No tests configured\" && exit 0",
+    "test": "tsx src/services/assistantPlanningParser.test.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "backup:export": "tsx scripts/exportBackup.ts",
     "db:reset": "tsx scripts/db-reset.ts",

@@ -28,3 +28,36 @@ export async function upsertPlanning(userId: number, data: PlanningData): Promis
   });
   return data;
 }
+
+function cryptoRandomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+export async function setSalaryAmount(userId: number, month: string, amount: number) {
+  const planning = await getPlanningByUserId(userId);
+  planning.salaryByMonth[month] = amount;
+  await upsertPlanning(userId, planning);
+  return { month, amount };
+}
+
+export async function addExtraIncome(userId: number, month: string, amount: number, label?: string) {
+  const planning = await getPlanningByUserId(userId);
+  const extras = planning.extrasByMonth[month] ?? [];
+  extras.push({ id: cryptoRandomId(), label, amount });
+  planning.extrasByMonth[month] = extras;
+  await upsertPlanning(userId, planning);
+  return { month, amount, label };
+}
+
+export async function addFixedBill(userId: number, label: string, amount: number) {
+  const planning = await getPlanningByUserId(userId);
+  const normalized = label.trim().toLowerCase();
+  const existing = planning.fixedBills.find((bill) => (bill.label ?? '').trim().toLowerCase() === normalized);
+  if (existing) {
+    existing.amount = amount;
+  } else {
+    planning.fixedBills.push({ id: cryptoRandomId(), label, amount });
+  }
+  await upsertPlanning(userId, planning);
+  return { label, amount };
+}

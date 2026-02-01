@@ -13,11 +13,17 @@ import {
   upsertAssistantConversationState,
 } from '../../services/assistantConversationService';
 import { parseExpenseMessage } from '../../services/assistantExpenseParser';
+import { parsePlanningMessage } from '../../services/assistantPlanningParser';
 import { formatCurrency } from '../../utils/money';
 import { dayjs, nowBahia, normalizeDateOnly, TZ } from '../../utils/dates';
 import { findCardByIdForUser, listCardsForUser } from '../../services/cardService';
 import { createInstallmentExpenses } from '../../services/installmentService';
 import { getInvoiceMonthForPurchase } from '../../utils/installments';
+import {
+  addExtraIncome,
+  addFixedBill,
+  setSalaryAmount,
+} from '../../services/planningService';
 
 const router = Router();
 
@@ -181,6 +187,71 @@ router.post('/chat', async (req: AuthedRequest, res) => {
   const normalizedLower = normalizedMessage.toLowerCase();
 
   let state = await getAssistantConversationState(convId, userId);
+
+  const planningIntent = parsePlanningMessage(normalizedMessage);
+  if (planningIntent) {
+    try {
+      let confirmation: string;
+
+      switch (planningIntent.planningAction) {
+        case 'set_salary':
+          await setSalaryAmount(userId, planningIntent.month, planningIntent.amount);
+          confirmation = `Salário de ${formatCurrency(planningIntent.amount)} registrado para ${planningIntent.month}.`;
+          break;
+        case 'add_extra_income':
+          await addExtraIncome(userId, planningIntent.month, planningIntent.amount, planningIntent.description);
+          confirmation = `Entrada extra de ${formatCurrency(planningIntent.amount)} registrada para ${planningIntent.month}.`;
+          break;
+        case 'add_fixed_bill':
+          await addFixedBill(userId, planningIntent.label ?? 'Conta fixa', planningIntent.amount);
+          confirmation = `Conta fixa ${planningIntent.label ?? ''} de ${formatCurrency(
+            planningIntent.amount,
+          )} registrada.`;
+          break;
+        default:
+          throw new Error('Ação desconhecida');
+      }
+
+      const planningStage: AssistantStage = 'saved';
+      await upsertAssistantConversationState({
+        conversationId: convId,
+        userId,
+        pendingExpenseDraft: {},
+        stage: planningStage,
+        lastExpenseId: state?.lastExpenseId ?? null,
+      });
+
+      logStage(userId, planningStage);
+      return res
+        .status(200)
+        .json(
+          ensureArrays({
+            conversationId: convId,
+            assistantMessage: confirmation,
+            cards: [],
+            suggestedActions: [],
+            state: buildStatePayload(planningStage),
+            uiHint: {
+              kind: 'planning',
+              planningAction: planningIntent.planningAction,
+              month: planningIntent.month,
+              amount: planningIntent.amount,
+              label: planningIntent.label,
+              description: planningIntent.description,
+            },
+          }),
+        );
+    } catch (error) {
+      console.error('[assistant] planning error', error);
+      return res.status(500).json({
+        conversationId: convId,
+        assistantMessage: 'Não consegui registrar o planejamento agora. Tente novamente em instantes.',
+        cards: [],
+        suggestedActions: [],
+        state: buildStatePayload(state?.stage ?? 'idle', state?.pendingExpenseDraft ?? undefined),
+      });
+    }
+  }
 
   if (includesGreeting(normalizedLower)) {
     const stage: AssistantStage = 'ask_description';
