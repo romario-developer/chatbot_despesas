@@ -58,9 +58,9 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     type: "metric",
     title: `Saldo estimado (${targetMonth})`,
     data: {
-      value: summary.balance,
+      value: summary.balanceCents,
       currency: "BRL",
-      detail: `Receitas: ${formatCurrency(summary.receitas)} • Gastos: ${formatCurrency(summary.totalExpenses)} • Em conta: ${formatCurrency(summary.saldoEmConta)}`,
+      detail: `Receitas: ${formatCurrency(summary.receitasCents)} • Gastos: ${formatCurrency(summary.totalExpensesCents)} • Em conta: ${formatCurrency(summary.saldoEmContaCents)}`,
     },
   });
 
@@ -73,7 +73,7 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
           title: item.category,
           value: item.total,
           formattedValue: formatCurrency(item.total),
-          percent: Number(((item.total / (summary.totalExpenses || 1)) * 100).toFixed(1)),
+        percent: Number(((item.total / (summary.totalExpensesCents || 1)) * 100).toFixed(1)),
         })),
       },
     });
@@ -121,14 +121,14 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     const planned = planning.salaryByMonth[targetMonth] ?? 0;
     const extras = (planning.extrasByMonth[targetMonth] ?? []).reduce((sum, item) => sum + item.amount, 0);
     const plannedTotal = planned + extras;
-    const difference = plannedTotal - summary.totalExpenses;
+    const difference = plannedTotal - summary.totalExpensesCents;
     cards.push({
       type: "metric",
       title: "Planejamento mensal",
       data: {
         value: difference,
         currency: "BRL",
-        detail: `Planejado: ${formatCurrency(plannedTotal)} • Realizado: ${formatCurrency(summary.totalExpenses)}`,
+    detail: `Planejado: ${formatCurrency(plannedTotal)} • Realizado: ${formatCurrency(summary.totalExpensesCents)}`,
       },
     });
   }
@@ -140,7 +140,7 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     { id: "ai-show-open-invoices", label: "Mostrar faturas em aberto", payload: { kind: "openInvoices" } },
   ];
 
-  const baseMessage = `No mês de ${targetMonth} você teve ${summary.expensesCount} lançamentos, totalizando ${formatCurrency(summary.totalExpenses)}. O saldo em conta está em ${formatCurrency(summary.balance)}.`;
+  const baseMessage = `No mês de ${targetMonth} você teve ${summary.expensesCount} lançamentos, totalizando ${formatCurrency(summary.totalExpensesCents)}. O saldo em conta está em ${formatCurrency(summary.balanceCents)}.`;
   let assistantMessage = baseMessage;
   if (asksForCards && invoicesResponse && invoicesResponse.length) {
     const openCount = invoicesResponse.filter((invoice) => invoice.remaining > 0).length;

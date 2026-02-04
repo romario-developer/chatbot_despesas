@@ -12,7 +12,7 @@ function parseMonthParam(value: unknown): string | null {
   return normalized;
 }
 
-// GET /summary?month=YYYY-MM -> { month, total, totalExpenses, expensesCount, totalPorCategoria, totalPorDia, salary, extras, fixas, saldo, saldoPrevisto, receitas, gastosCaixa, gastosCredito, saldoEmConta }
+// GET /summary?month=YYYY-MM -> returns aggregates and planning values in centavos (salaryCents, extrasCents, receitasCents, gastosCents, balanceCents, etc.)
 router.get('/', async (req: AuthedRequest, res) => {
   const month = parseMonthParam(req.query.month);
   const userId = req.user?.id;
@@ -25,34 +25,50 @@ router.get('/', async (req: AuthedRequest, res) => {
   }
 
   try {
+    console.log('[summary] request payload', { userId, month });
     const summary = await getMonthlySummary({
       userId,
       month,
     });
 
-    return res.json({
+    const payload = {
       month: summary.month,
-      total: summary.total,
-      totalExpenses: summary.totalExpenses,
+      totalCents: summary.totalCents,
+      total: summary.totalCents,
+      totalExpensesCents: summary.totalExpensesCents,
+      totalExpenses: summary.totalExpensesCents,
       expensesCount: summary.expensesCount,
       totalPorCategoria: summary.totalPorCategoria.map((item) => ({
         category: item.category,
+        totalCents: item.totalCents,
         total: item.total,
       })),
       totalPorDia: summary.totalPorDia.map((item) => ({
         date: item.date,
+        totalCents: item.totalCents,
         total: item.total,
       })),
-      salary: summary.salaryTotal,
-      extras: summary.extrasTotal,
-      fixas: summary.fixedPlannedTotal,
-      saldo: summary.balance,
-      saldoPrevisto: summary.forecastBalance,
-      receitas: summary.receitas,
-      gastosCaixa: summary.gastosCaixa,
-      gastosCredito: summary.gastosCredito,
-      saldoEmConta: summary.saldoEmConta,
-    });
+      salaryCents: summary.salaryCents,
+      salary: summary.salaryCents,
+      extrasCents: summary.extrasCents,
+      extras: summary.extrasCents,
+      fixasCents: summary.fixedPlannedTotalCents,
+      fixas: summary.fixedPlannedTotalCents,
+      saldoCents: summary.balanceCents,
+      balanceCents: summary.balanceCents,
+      saldoPrevistoCents: summary.forecastBalanceCents,
+      receitasCents: summary.receitasCents,
+      receitas: summary.receitasCents,
+      gastosCaixaCents: summary.gastosCaixaCents,
+      gastosCaixa: summary.gastosCaixaCents,
+      gastosCreditoCents: summary.gastosCreditoCents,
+      gastosCredito: summary.gastosCreditoCents,
+      saldoEmContaCents: summary.saldoEmContaCents,
+      saldoEmConta: summary.saldoEmContaCents,
+    };
+
+    console.log('[summary] response (cents)', payload);
+    return res.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo';
     if (message.toLowerCase().includes('month') || message.toLowerCase().includes('user')) {
