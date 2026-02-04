@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { authMiddleware } from './middleware/auth';
-import { noCacheMiddleware } from './middleware/noCache';
+import { applyNoCache } from './middleware/applyNoCache';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import assistantRoutes from './routes/assistant';
@@ -32,9 +32,8 @@ router.use(requireDb);
 
 router.use('/assistant', assistantRoutes);
 router.use('/ai', aiRoutes);
-router.use(noCacheMiddleware);
-router.use('/entries', entriesRoutes);
-router.use('/dashboard', dashboardRoutes);
+router.use('/entries', applyNoCache, entriesRoutes);
+router.use('/dashboard', applyNoCache, dashboardRoutes);
 router.use('/cards', cardsRoutes);
 router.use('/credits', creditsRoutes);
 router.use('/credit', creditsRoutes);
@@ -43,8 +42,8 @@ router.use('/quick-entry', quickEntryRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/me', meRoutes);
 router.use('/reports', reportsRoutes);
-router.use('/summary', summaryRoutes);
-router.use('/planning', planningRoutes);
+router.use('/summary', applyNoCache, summaryRoutes);
+router.use('/planning', applyNoCache, planningRoutes);
 
 router.use((req, res) => {
   console.warn(`[api] 404 ${req.method} ${req.originalUrl}`);
