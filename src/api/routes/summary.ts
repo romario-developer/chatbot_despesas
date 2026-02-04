@@ -33,11 +33,17 @@ router.get('/', async (req: AuthedRequest, res) => {
 
     const payload = {
       month: summary.month,
+
+      // totais gerais
       totalCents: summary.totalCents,
-      total: summary.totalCents,
+      total: summary.total,
+
       totalExpensesCents: summary.totalExpensesCents,
-      totalExpenses: summary.totalExpensesCents,
+      totalExpenses: summary.totalExpenses,
+
       expensesCount: summary.expensesCount,
+
+      // agrupamentos
       totalPorCategoria: summary.totalPorCategoria.map((item) => ({
         category: item.category,
         totalCents: item.totalCents,
@@ -48,23 +54,36 @@ router.get('/', async (req: AuthedRequest, res) => {
         totalCents: item.totalCents,
         total: item.total,
       })),
+
+      // planejamento
       salaryCents: summary.salaryCents,
-      salary: summary.salaryCents,
+      salary: summary.salaryTotal,
+
       extrasCents: summary.extrasCents,
-      extras: summary.extrasCents,
+      extras: summary.extrasTotal,
+
       fixasCents: summary.fixedPlannedTotalCents,
-      fixas: summary.fixedPlannedTotalCents,
-      saldoCents: summary.balanceCents,
-      balanceCents: summary.balanceCents,
-      saldoPrevistoCents: summary.forecastBalanceCents,
+      fixas: summary.fixedPlannedTotal,
+
+      // receitas/gastos/saldos
       receitasCents: summary.receitasCents,
-      receitas: summary.receitasCents,
+      receitas: summary.receitas,
+
       gastosCaixaCents: summary.gastosCaixaCents,
-      gastosCaixa: summary.gastosCaixaCents,
+      gastosCaixa: summary.gastosCaixa,
+
       gastosCreditoCents: summary.gastosCreditoCents,
-      gastosCredito: summary.gastosCreditoCents,
+      gastosCredito: summary.gastosCredito,
+
       saldoEmContaCents: summary.saldoEmContaCents,
-      saldoEmConta: summary.saldoEmContaCents,
+      saldoEmConta: summary.saldoEmConta,
+
+      balanceCents: summary.balanceCents,
+      saldoCents: summary.balanceCents, // se o frontend usa saldoCents, mantém
+      saldo: summary.balance,           // opcional: expor saldo em reais
+
+      saldoPrevistoCents: summary.forecastBalanceCents,
+      saldoPrevisto: summary.forecastBalance,
     };
 
     console.log('[summary] response (cents)', payload);
