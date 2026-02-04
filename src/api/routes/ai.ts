@@ -10,6 +10,7 @@ import {
   tool_getTopEntries,
 } from "../../services/aiToolService";
 import { dayjs, TZ } from "../../utils/dates";
+import { formatCurrency } from "../../utils/money";
 
 const router = Router();
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
@@ -37,12 +38,6 @@ function pushHistory(id: string, role: "user" | "assistant", text: string) {
 function needsMonthClarification(text: string) {
   const normalized = text.toLowerCase();
   return monthKeywords.some((keyword) => normalized.includes(keyword));
-}
-
-const CURRENCY_FORMATTER = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-
-function formatCurrency(value: number) {
-  return CURRENCY_FORMATTER.format(value);
 }
 
 async function buildAssistantResponse(userId: number, targetMonth: string, message: string) {

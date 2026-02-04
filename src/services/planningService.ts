@@ -1,15 +1,20 @@
 import { prisma } from '../infra/db/prisma';
+import { toCentsBRL } from '../utils/money';
+
+export const PLANNING_FORMAT_VERSION = 2;
 
 export type PlanningData = {
   salaryByMonth: Record<string, number>;
   extrasByMonth: Record<string, { id: string; label?: string; amount: number }[]>;
   fixedBills: { id: string; label?: string; amount: number }[];
+  formatVersion?: number;
 };
 
 export const DEFAULT_PLANNING: PlanningData = {
   salaryByMonth: {},
   extrasByMonth: {},
   fixedBills: [],
+  formatVersion: PLANNING_FORMAT_VERSION,
 };
 
 export async function getPlanningByUserId(userId: number): Promise<PlanningData> {
@@ -17,20 +22,69 @@ export async function getPlanningByUserId(userId: number): Promise<PlanningData>
   if (!planning) return DEFAULT_PLANNING;
 
   const data = planning.data as PlanningData | null;
-  return data ?? DEFAULT_PLANNING;
+  if (!data) return DEFAULT_PLANNING;
+  if (data.formatVersion === PLANNING_FORMAT_VERSION) {
+    return data;
+  }
+  const migrated = migratePlanningData(data);
+  await prisma.planning.update({
+    where: { userId },
+    data: migrated,
+  });
+  return migrated;
 }
 
 export async function upsertPlanning(userId: number, data: PlanningData): Promise<PlanningData> {
+  const payload: PlanningData = {
+    ...data,
+    formatVersion: PLANNING_FORMAT_VERSION,
+  };
   await prisma.planning.upsert({
     where: { userId },
-    update: { data },
-    create: { userId, data },
+    update: { data: payload },
+    create: { userId, data: payload },
   });
-  return data;
+  return payload;
 }
 
 function cryptoRandomId() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function convertPlanningAmount(value: unknown): number {
+  const cents = toCentsBRL(value);
+  if (cents === null || cents < 0) return 0;
+  return cents;
+}
+
+function migratePlanningData(raw: PlanningData): PlanningData {
+  const salaryByMonth: Record<string, number> = {};
+  for (const [month, value] of Object.entries(raw.salaryByMonth ?? {})) {
+    salaryByMonth[month] = convertPlanningAmount(value);
+  }
+
+  const extrasByMonth: Record<string, { id: string; label?: string; amount: number }[]> = {};
+  for (const [month, items] of Object.entries(raw.extrasByMonth ?? {})) {
+    if (!Array.isArray(items)) continue;
+    extrasByMonth[month] = items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      amount: convertPlanningAmount(item.amount),
+    }));
+  }
+
+  const fixedBills = (raw.fixedBills ?? []).map((bill) => ({
+    id: bill.id,
+    label: bill.label,
+    amount: convertPlanningAmount(bill.amount),
+  }));
+
+  return {
+    salaryByMonth,
+    extrasByMonth,
+    fixedBills,
+    formatVersion: PLANNING_FORMAT_VERSION,
+  };
 }
 
 export async function setSalaryAmount(userId: number, month: string, amount: number) {

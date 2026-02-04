@@ -3,7 +3,7 @@ import { prisma } from "../infra/db/prisma";
 import { dayjs, TZ } from "../utils/dates";
 import { getPlanningByUserId } from "./planningService";
 import { getMonthRangeFromIsoMonth } from "../utils/dateRange";
-import { assertValidAmountCents, centsToNumber } from "../utils/money";
+import { assertValidAmountCents } from "../utils/money";
 
 type SummaryCategory = { category: string; totalCents: number; total: number };
 type SummaryDay = { date: string; totalCents: number; total: number };
@@ -143,17 +143,14 @@ export async function getMonthlySummary(params: { userId: number; month: string 
   const salaryTotal = planning.salaryByMonth[month] ?? 0;
   const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
   const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
-  const receita = salaryTotal + extrasTotal;
-  const totalExpenses = centsToNumber(totalCents);
+  const totalExpensesCents = totalCents;
+  const receitasCents = salaryTotal + extrasTotal;
   const gastosCaixaCents = cashAgg._sum.amountCents ?? 0;
   const gastosCreditoCents = creditAgg._sum.amountCents ?? 0;
-  const gastosCaixa = centsToNumber(gastosCaixaCents);
-  const gastosCredito = centsToNumber(gastosCreditoCents);
-  const cardPayments = centsToNumber(cardPaymentCents);
-  const receitas = receita;
-  const saldoEmConta = receitas - gastosCaixa - cardPayments;
+  const cardPaymentsCents = cardPaymentCents;
+  const saldoEmConta = receitasCents - gastosCaixaCents - cardPaymentsCents;
   const balance = saldoEmConta;
-  const forecastBalance = receitas - totalExpenses - fixedPlannedTotal;
+  const forecastBalance = receitasCents - totalExpensesCents - fixedPlannedTotal;
 
   if (isDebugDashboard) {
     console.log("[dashboard-debug] month", { month, start: start.toISOString(), end: endExclusive.toISOString() });
@@ -164,10 +161,10 @@ export async function getMonthlySummary(params: { userId: number; month: string 
       cardPayments: cardPaymentCount,
     });
     console.log("[dashboard-debug] totals", {
-      receitas,
-      gastosCaixa,
-      gastosCredito,
-      cardPayments,
+      receitas: receitasCents,
+      gastosCaixa: gastosCaixaCents,
+      gastosCredito: gastosCreditoCents,
+      cardPayments: cardPaymentsCents,
       saldoEmConta,
     });
   }
@@ -176,13 +173,13 @@ export async function getMonthlySummary(params: { userId: number; month: string 
   console.log("SUMMARY", {
     userId,
     month,
-    totalExpenses,
+    totalExpenses: totalExpensesCents,
     countBySource: totalsBySource.map((s) => ({ source: s.source, count: s._count._all, cents: s._sum.amountCents })),
   });
 
   if (process.env.NODE_ENV !== "production") {
     console.log(
-      "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%.2f extras=%.2f fixas=%.2f",
+      "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%d extras=%d fixas=%d",
       userId,
       month,
       start.toISOString(),
@@ -201,24 +198,24 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     end: new Date(endExclusive.getTime() - 1),
     expensesCount,
     totalCents,
-    total: centsToNumber(totalCents),
-    totalExpenses,
+    total: totalCents,
+    totalExpenses: totalExpensesCents,
     totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
       category,
       totalCents: cents,
-      total: centsToNumber(cents),
+      total: cents,
     })),
     totalPorDia: Array.from(totalPorDia.entries()).map(([date, cents]) => ({
       date,
       totalCents: cents,
-      total: centsToNumber(cents),
+      total: cents,
     })),
     salaryTotal,
     extrasTotal,
     fixedPlannedTotal,
-    receitas,
-    gastosCaixa,
-    gastosCredito,
+    receitas: receitasCents,
+    gastosCaixa: gastosCaixaCents,
+    gastosCredito: gastosCreditoCents,
     saldoEmConta,
     balance,
     forecastBalance,

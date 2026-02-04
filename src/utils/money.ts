@@ -1,26 +1,31 @@
-export function parsePtBrMoneyToCents(value: string | number): number | null {
+function normalizeMoneyString(raw: string): string | null {
+  const cleaned = raw.replace(/R\$/gi, '').replace(/\s+/g, '');
+  if (!cleaned) return null;
+  if (cleaned.includes(',')) {
+    return cleaned.replace(/\./g, '').replace(',', '.');
+  }
+  return cleaned;
+}
+
+export function toCentsBRL(value: unknown): number | null {
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return null;
     return Math.round(value * 100);
   }
 
-  if (typeof value !== 'string') return null;
-  let normalized = value
-    .replace(/R\$/gi, '')
-    .replace(/\s+/g, '');
-
-  if (!normalized) return null;
-
-  const hasComma = normalized.includes(',');
-  const hasDot = normalized.includes('.');
-
-  if (hasComma) {
-    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  if (typeof value === 'string') {
+    const normalized = normalizeMoneyString(value);
+    if (!normalized) return null;
+    const parsed = Number.parseFloat(normalized);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.round(parsed * 100);
   }
 
-  const amount = Number.parseFloat(normalized);
-  if (!Number.isFinite(amount)) return null;
-  return Math.round(amount * 100);
+  return null;
+}
+
+export function parsePtBrMoneyToCents(value: string | number): number | null {
+  return toCentsBRL(value);
 }
 
 export function amountStringToNumber(raw: string): number | null {
@@ -34,16 +39,7 @@ export function amountStringToCents(raw: string): number | null {
 }
 
 export function toAmountCents(amount: unknown): number | null {
-  if (typeof amount === 'number') {
-    if (!Number.isFinite(amount)) return null;
-    return Math.round(amount * 100);
-  }
-
-  if (typeof amount === 'string') {
-    return parsePtBrMoneyToCents(amount);
-  }
-
-  return null;
+  return toCentsBRL(amount);
 }
 
 export function assertValidAmountCents(

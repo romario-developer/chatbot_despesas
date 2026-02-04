@@ -4,7 +4,7 @@ import { prisma } from '../../infra/db/prisma';
 import { getPlanningByUserId } from '../../services/planningService';
 import { dayjs, nowBahia, TZ } from '../../utils/dates';
 import { getMonthRangeFromMonthYear } from '../../utils/dateRange';
-import { assertValidAmountCents, centsToNumber } from '../../utils/money';
+import { assertValidAmountCents } from '../../utils/money';
 import { getCategoryColor } from '../../utils/colors';
 import type { AuthedRequest } from '../middleware/auth';
 
@@ -75,7 +75,8 @@ router.get('/summary', async (req: AuthedRequest, res) => {
           categoryId,
           categoryName: category.name,
           color: getCategoryColor(category.name),
-          total: centsToNumber(amountCents),
+          total: amountCents,
+          totalCents: amountCents,
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
@@ -84,7 +85,7 @@ router.get('/summary', async (req: AuthedRequest, res) => {
     const salaryTotal = planning.salaryByMonth[month] ?? 0;
     const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
     const incomeTotal = salaryTotal + extrasTotal;
-    const expenseTotal = centsToNumber(expenseTotalCents);
+    const expenseTotal = expenseTotalCents;
     const balance = incomeTotal - expenseTotal;
 
     return res.json({
