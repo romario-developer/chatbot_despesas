@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../infra/db/prisma';
 import { toCentsBRL } from '../utils/money';
 
@@ -27,9 +28,10 @@ export async function getPlanningByUserId(userId: number): Promise<PlanningData>
     return data;
   }
   const migrated = migratePlanningData(data);
+  const migratedJson: Prisma.InputJsonValue = migrated;
   await prisma.planning.update({
     where: { userId },
-    data: migrated,
+    data: { data: migratedJson },
   });
   return migrated;
 }
@@ -39,10 +41,11 @@ export async function upsertPlanning(userId: number, data: PlanningData): Promis
     ...data,
     formatVersion: PLANNING_FORMAT_VERSION,
   };
+  const payloadJson: Prisma.InputJsonValue = payload;
   await prisma.planning.upsert({
     where: { userId },
-    update: { data: payload },
-    create: { userId, data: payload },
+    update: { data: payloadJson },
+    create: { userId, data: payloadJson },
   });
   return payload;
 }
