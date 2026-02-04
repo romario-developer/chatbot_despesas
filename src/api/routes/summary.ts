@@ -34,26 +34,12 @@ router.get('/', async (req: AuthedRequest, res) => {
     const payload = {
       month: summary.month,
 
-      // totais gerais
+      // totais
       totalCents: summary.totalCents,
       total: summary.total,
 
       totalExpensesCents: summary.totalExpensesCents,
       totalExpenses: summary.totalExpenses,
-
-      expensesCount: summary.expensesCount,
-
-      // agrupamentos
-      totalPorCategoria: summary.totalPorCategoria.map((item) => ({
-        category: item.category,
-        totalCents: item.totalCents,
-        total: item.total,
-      })),
-      totalPorDia: summary.totalPorDia.map((item) => ({
-        date: item.date,
-        totalCents: item.totalCents,
-        total: item.total,
-      })),
 
       // planejamento
       salaryCents: summary.salaryCents,
@@ -62,10 +48,7 @@ router.get('/', async (req: AuthedRequest, res) => {
       extrasCents: summary.extrasCents,
       extras: summary.extrasTotal,
 
-      fixasCents: summary.fixedPlannedTotalCents,
-      fixas: summary.fixedPlannedTotal,
-
-      // receitas/gastos/saldos
+      // receitas e gastos
       receitasCents: summary.receitasCents,
       receitas: summary.receitas,
 
@@ -75,15 +58,29 @@ router.get('/', async (req: AuthedRequest, res) => {
       gastosCreditoCents: summary.gastosCreditoCents,
       gastosCredito: summary.gastosCredito,
 
+      // saldos
       saldoEmContaCents: summary.saldoEmContaCents,
       saldoEmConta: summary.saldoEmConta,
 
       balanceCents: summary.balanceCents,
-      saldoCents: summary.balanceCents, // se o frontend usa saldoCents, mantém
-      saldo: summary.balance,           // opcional: expor saldo em reais
+      balance: summary.balance,
 
       saldoPrevistoCents: summary.forecastBalanceCents,
       saldoPrevisto: summary.forecastBalance,
+
+      expensesCount: summary.expensesCount,
+
+      totalPorCategoria: summary.totalPorCategoria.map((item) => ({
+        category: item.category,
+        totalCents: item.totalCents,
+        total: item.total,
+      })),
+
+      totalPorDia: summary.totalPorDia.map((item) => ({
+        date: item.date,
+        totalCents: item.totalCents,
+        total: item.total,
+      })),
     };
 
     console.log('[summary] response (cents)', payload);
