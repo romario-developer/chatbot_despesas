@@ -16,17 +16,28 @@ export type MonthlySummaryResult = {
   totalCents: number;
   total: number;
   totalExpenses: number;
+  totalExpensesCents: number;
   totalPorCategoria: SummaryCategory[];
   totalPorDia: SummaryDay[];
   salaryTotal: number;
+  salaryCents: number;
   extrasTotal: number;
+  extrasCents: number;
   fixedPlannedTotal: number;
+  fixedPlannedTotalCents: number;
   balance: number;
+  balanceCents: number;
   forecastBalance: number;
+  forecastBalanceCents: number;
   receitas: number;
+  receitasCents: number;
   gastosCaixa: number;
+  gastosCaixaCents: number;
   gastosCredito: number;
+  gastosCreditoCents: number;
+  cardPaymentsCents: number;
   saldoEmConta: number;
+  saldoEmContaCents: number;
 };
 
 export async function getMonthlySummary(params: { userId: number; month: string }) {
@@ -139,85 +150,132 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + amountCents);
   }
 
+  const centsToNumber = (cents: number) => cents / 100;
+
   const planning = await getPlanningByUserId(userId);
-  const salaryTotal = planning.salaryByMonth[month] ?? 0;
-  const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
-  const fixedPlannedTotal = planning.fixedBills.reduce((sum, item) => sum + item.amount, 0);
+
+  // planning deve estar em CENTAVOS
+  const salaryCents = assertValidAmountCents(
+    planning.salaryByMonth[month] ?? 0,
+    `planning.salaryByMonth[${month}]`,
+    { allowZero: true }
+  );
+
+  const extrasCents = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => {
+    // item.amount deve ser CENTAVOS
+    const c = assertValidAmountCents(item.amount, `planning.extra.amount`, { allowZero: true });
+    return sum + c;
+  }, 0);
+
+  const fixedPlannedTotalCents = planning.fixedBills.reduce((sum, item) => {
+    const c = assertValidAmountCents(item.amount, `planning.fixedBill.amount`, { allowZero: true });
+    return sum + c;
+  }, 0);
+
   const totalExpensesCents = totalCents;
-  const receitasCents = salaryTotal + extrasTotal;
+  const receitasCents = salaryCents + extrasCents;
   const gastosCaixaCents = cashAgg._sum.amountCents ?? 0;
   const gastosCreditoCents = creditAgg._sum.amountCents ?? 0;
   const cardPaymentsCents = cardPaymentCents;
-  const saldoEmConta = receitasCents - gastosCaixaCents - cardPaymentsCents;
-  const balance = saldoEmConta;
-  const forecastBalance = receitasCents - totalExpensesCents - fixedPlannedTotal;
+
+  const saldoEmContaCents = receitasCents - gastosCaixaCents - cardPaymentsCents;
+  const balanceCents = saldoEmContaCents;
+  const forecastBalanceCents = receitasCents - totalExpensesCents - fixedPlannedTotalCents;
+
+  // Valores HUMANOS (REAIS)
+  const total = centsToNumber(totalCents);
+  const totalExpenses = centsToNumber(totalExpensesCents);
+  const salaryTotal = centsToNumber(salaryCents);
+  const extrasTotal = centsToNumber(extrasCents);
+  const fixedPlannedTotal = centsToNumber(fixedPlannedTotalCents);
+  const receitas = centsToNumber(receitasCents);
+  const gastosCaixa = centsToNumber(gastosCaixaCents);
+  const gastosCredito = centsToNumber(gastosCreditoCents);
+  const saldoEmConta = centsToNumber(saldoEmContaCents);
+  const balance = centsToNumber(balanceCents);
+  const forecastBalance = centsToNumber(forecastBalanceCents);
 
   if (isDebugDashboard) {
-    console.log("[dashboard-debug] month", { month, start: start.toISOString(), end: endExclusive.toISOString() });
-    console.log("[dashboard-debug] counts", {
-      expenses: expensesCount,
-      cash: cashCount,
-      credit: creditCount,
-      cardPayments: cardPaymentCount,
+    console.log("[dashboard-debug] totals (CENTS)", {
+      salaryCents,
+      extrasCents,
+      receitasCents,
+      gastosCaixaCents,
+      gastosCreditoCents,
+      cardPaymentsCents,
+      saldoEmContaCents,
+      balanceCents,
+      forecastBalanceCents,
+      totalExpensesCents,
+      fixedPlannedTotalCents,
     });
-    console.log("[dashboard-debug] totals", {
-      receitas: receitasCents,
-      gastosCaixa: gastosCaixaCents,
-      gastosCredito: gastosCreditoCents,
-      cardPayments: cardPaymentsCents,
-      saldoEmConta,
-    });
-  }
 
-  console.log("[monthly-summary]", { userId, month });
-  console.log("SUMMARY", {
-    userId,
-    month,
-    totalExpenses: totalExpensesCents,
-    countBySource: totalsBySource.map((s) => ({ source: s.source, count: s._count._all, cents: s._sum.amountCents })),
-  });
-
-  if (process.env.NODE_ENV !== "production") {
-    console.log(
-      "[summary] userId=%s month=%s start=%s end=%s count=%d totalCents=%d salary=%d extras=%d fixas=%d",
-      userId,
-      month,
-      start.toISOString(),
-      new Date(endExclusive.getTime() - 1).toISOString(),
-      expensesCount,
-      totalCents,
+    console.log("[dashboard-debug] totals (REAIS)", {
       salaryTotal,
       extrasTotal,
+      receitas,
+      gastosCaixa,
+      gastosCredito,
+      saldoEmConta,
+      balance,
+      forecastBalance,
+      totalExpenses,
       fixedPlannedTotal,
-    );
+    });
   }
 
   return {
     month,
-    start: start,
+    start,
     end: new Date(endExclusive.getTime() - 1),
+
     expensesCount,
+
+    // totais gerais
     totalCents,
-    total: totalCents,
-    totalExpenses: totalExpensesCents,
+    total,
+
+    totalExpensesCents,
+    totalExpenses,
+
+    // agrupamentos
     totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
       category,
       totalCents: cents,
-      total: cents,
+      total: centsToNumber(cents),
     })),
+
     totalPorDia: Array.from(totalPorDia.entries()).map(([date, cents]) => ({
       date,
       totalCents: cents,
-      total: cents,
+      total: centsToNumber(cents),
     })),
+
+    // planejamento
+    salaryCents,
     salaryTotal,
+    extrasCents,
     extrasTotal,
+    fixedPlannedTotalCents,
     fixedPlannedTotal,
-    receitas: receitasCents,
-    gastosCaixa: gastosCaixaCents,
-    gastosCredito: gastosCreditoCents,
+
+    // resumo
+    receitasCents,
+    receitas,
+    gastosCaixaCents,
+    gastosCaixa,
+    gastosCreditoCents,
+    gastosCredito,
+
+    cardPaymentsCents,
+
+    saldoEmContaCents,
     saldoEmConta,
+
+    balanceCents,
     balance,
+
+    forecastBalanceCents,
     forecastBalance,
   };
 }
