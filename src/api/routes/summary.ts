@@ -34,46 +34,20 @@ router.get('/', async (req: AuthedRequest, res) => {
     const payload = {
       month: summary.month,
 
-      // totais
-      totalCents: summary.totalCents,
-      total: summary.total,
+      balanceCents: summary.balanceCents,
+      incomeTotalCents: summary.receitasCents,
+      expenseTotalCents: summary.totalExpensesCents,
 
-      totalExpensesCents: summary.totalExpensesCents,
-      totalExpenses: summary.totalExpenses,
-
-      // planejamento
       salaryCents: summary.salaryCents,
-      salary: summary.salaryTotal,
-
       extrasCents: summary.extrasCents,
-      extras: summary.extrasTotal,
-
-      // receitas e gastos
-      receitasCents: summary.receitasCents,
-      receitas: summary.receitas,
 
       gastosCaixaCents: summary.gastosCaixaCents,
-      gastosCaixa: summary.gastosCaixa,
-
       gastosCreditoCents: summary.gastosCreditoCents,
-      gastosCredito: summary.gastosCredito,
 
-      // saldos
-      saldoEmContaCents: summary.saldoEmContaCents,
-      saldoEmConta: summary.saldoEmConta,
-
-      balanceCents: summary.balanceCents,
-      balance: summary.balance, // balance is intentionally returned in centavos (int)
-
-      saldoPrevistoCents: summary.forecastBalanceCents,
-      saldoPrevisto: summary.forecastBalance,
-
-      expensesCount: summary.expensesCount,
-
-      totalPorCategoria: summary.totalPorCategoria.map((item) => ({
+      byCategory: summary.totalPorCategoria.map((item) => ({
         category: item.category,
         totalCents: item.totalCents,
-        total: item.total, // total also represents centavos for compatibility
+        total: item.total,
       })),
 
       totalPorDia: summary.totalPorDia.map((item) => ({
@@ -81,9 +55,11 @@ router.get('/', async (req: AuthedRequest, res) => {
         totalCents: item.totalCents,
         total: item.total,
       })),
+
+      expensesCount: summary.expensesCount,
     };
 
-    console.log('[api/summary response]', payload);
+    console.log("[summary-backend]", payload);
     return res.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo';

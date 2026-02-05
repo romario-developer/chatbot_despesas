@@ -14,29 +14,18 @@ export type MonthlySummaryResult = {
   end: Date;
   expensesCount: number;
   totalCents: number;
-  total: number;
-  totalExpenses: number;
   totalExpensesCents: number;
   totalPorCategoria: SummaryCategory[];
   totalPorDia: SummaryDay[];
-  salaryTotal: number;
   salaryCents: number;
-  extrasTotal: number;
   extrasCents: number;
-  fixedPlannedTotal: number;
   fixedPlannedTotalCents: number;
-  balance: number;
   balanceCents: number;
-  forecastBalance: number;
   forecastBalanceCents: number;
-  receitas: number;
   receitasCents: number;
-  gastosCaixa: number;
   gastosCaixaCents: number;
-  gastosCredito: number;
   gastosCreditoCents: number;
   cardPaymentsCents: number;
-  saldoEmConta: number;
   saldoEmContaCents: number;
 };
 
@@ -150,8 +139,6 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     totalPorDia.set(dateKey, (totalPorDia.get(dateKey) ?? 0) + amountCents);
   }
 
-  const centsToNumber = (cents: number) => cents / 100;
-
   const planning = await getPlanningByUserId(userId);
 
   // planning deve estar em CENTAVOS
@@ -182,19 +169,6 @@ export async function getMonthlySummary(params: { userId: number; month: string 
   const balanceCents = saldoEmContaCents;
   const forecastBalanceCents = receitasCents - totalExpensesCents - fixedPlannedTotalCents;
 
-  // Valores HUMANOS (REAIS)
-  const total = centsToNumber(totalCents);
-  const totalExpenses = centsToNumber(totalExpensesCents);
-  const salaryTotal = centsToNumber(salaryCents);
-  const extrasTotal = centsToNumber(extrasCents);
-  const fixedPlannedTotal = centsToNumber(fixedPlannedTotalCents);
-  const receitas = centsToNumber(receitasCents);
-  const gastosCaixa = centsToNumber(gastosCaixaCents);
-  const gastosCredito = centsToNumber(gastosCreditoCents);
-  const saldoEmConta = centsToNumber(saldoEmContaCents);
-  const balance = centsToNumber(balanceCents);
-  const forecastBalance = centsToNumber(forecastBalanceCents);
-
   if (isDebugDashboard) {
     console.log("[dashboard-debug] totals (CENTS)", {
       salaryCents,
@@ -209,39 +183,19 @@ export async function getMonthlySummary(params: { userId: number; month: string 
       totalExpensesCents,
       fixedPlannedTotalCents,
     });
-
-    console.log("[dashboard-debug] totals (REAIS)", {
-      salaryTotal,
-      extrasTotal,
-      receitas,
-      gastosCaixa,
-      gastosCredito,
-      saldoEmConta,
-      balance,
-      forecastBalance,
-      totalExpenses,
-      fixedPlannedTotal,
-    });
   }
 
   console.log("[monthly-summary-values]", {
     month,
     totalCents,
-    total,
     totalExpensesCents,
-    totalExpenses,
     receitasCents,
-    receitas,
     gastosCaixaCents,
-    gastosCaixa,
     gastosCreditoCents,
-    gastosCredito,
     saldoEmContaCents,
-    saldoEmConta,
     balanceCents,
-    balance,
     forecastBalanceCents,
-    forecastBalance,
+    fixedPlannedTotalCents,
   });
 
   return {
@@ -251,51 +205,39 @@ export async function getMonthlySummary(params: { userId: number; month: string 
 
     expensesCount,
 
-    // totais gerais
     totalCents,
-    total,
 
     totalExpensesCents,
-    totalExpenses,
 
     // agrupamentos
     totalPorCategoria: Array.from(totalPorCategoria.entries()).map(([category, cents]) => ({
       category,
       totalCents: cents,
-      total: centsToNumber(cents),
+      total: cents,
     })),
 
     totalPorDia: Array.from(totalPorDia.entries()).map(([date, cents]) => ({
       date,
       totalCents: cents,
-      total: centsToNumber(cents),
+      total: cents,
     })),
 
     // planejamento
     salaryCents,
-    salaryTotal,
     extrasCents,
-    extrasTotal,
     fixedPlannedTotalCents,
-    fixedPlannedTotal,
 
     // resumo
     receitasCents,
-    receitas,
     gastosCaixaCents,
-    gastosCaixa,
     gastosCreditoCents,
-    gastosCredito,
 
     cardPaymentsCents,
 
     saldoEmContaCents,
-    saldoEmConta,
 
     balanceCents,
-    balance,
 
     forecastBalanceCents,
-    forecastBalance,
   };
 }
