@@ -224,6 +224,26 @@ export async function getMonthlySummary(params: { userId: number; month: string 
     });
   }
 
+  console.log("[monthly-summary-values]", {
+    month,
+    totalCents,
+    total,
+    totalExpensesCents,
+    totalExpenses,
+    receitasCents,
+    receitas,
+    gastosCaixaCents,
+    gastosCaixa,
+    gastosCreditoCents,
+    gastosCredito,
+    saldoEmContaCents,
+    saldoEmConta,
+    balanceCents,
+    balance,
+    forecastBalanceCents,
+    forecastBalance,
+  });
+
   return {
     month,
     start,
