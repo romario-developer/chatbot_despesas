@@ -63,7 +63,7 @@ router.get('/', async (req: AuthedRequest, res) => {
       saldoEmConta: summary.saldoEmConta,
 
       balanceCents: summary.balanceCents,
-      balance: summary.balance,
+      balance: summary.balance, // balance is intentionally returned in centavos (int)
 
       saldoPrevistoCents: summary.forecastBalanceCents,
       saldoPrevisto: summary.forecastBalance,
@@ -73,7 +73,7 @@ router.get('/', async (req: AuthedRequest, res) => {
       totalPorCategoria: summary.totalPorCategoria.map((item) => ({
         category: item.category,
         totalCents: item.totalCents,
-        total: item.total,
+        total: item.total, // total also represents centavos for compatibility
       })),
 
       totalPorDia: summary.totalPorDia.map((item) => ({
@@ -83,7 +83,7 @@ router.get('/', async (req: AuthedRequest, res) => {
       })),
     };
 
-    console.log('[summary] response (cents)', payload);
+    console.log('[api/summary response]', payload);
     return res.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao calcular resumo';
