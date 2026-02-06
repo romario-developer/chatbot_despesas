@@ -4,7 +4,7 @@ import { ZodError } from 'zod';
 import { ApiError } from '../../errors/ApiError';
 
 export function formatZodValidationMessage(error: ZodError) {
-  const issues = error.errors.map((issue) => {
+  const issues = error.issues.map((issue) => {
     const path = issue.path.length ? issue.path.join('.') : 'value';
     return `${path} ${issue.message}`;
   });
@@ -33,7 +33,7 @@ export default function errorHandler(
     res.status(400).json({
       error: formatZodValidationMessage(err) || 'Validation failed',
       code: 'VALIDATION_ERROR',
-      details: err.errors,
+      details: err.issues,
     });
     return;
   }
