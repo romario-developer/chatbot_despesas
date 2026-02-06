@@ -82,17 +82,17 @@ router.get('/summary', async (req: AuthedRequest, res) => {
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .sort((a, b) => b.total - a.total);
 
-    const salaryTotal = planning.salaryByMonth[month] ?? 0;
-    const extrasTotal = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
-    const incomeTotal = salaryTotal + extrasTotal;
-    const expenseTotal = expenseTotalCents;
-    const balance = incomeTotal - expenseTotal;
+    const salaryCents = planning.salaryByMonth[month] ?? 0;
+    const extrasCents = (planning.extrasByMonth[month] ?? []).reduce((sum, item) => sum + item.amount, 0);
+    const incomeTotalCents = salaryCents + extrasCents;
+    const expenseTotalCentsActual = expenseTotalCents;
+    const balanceCents = incomeTotalCents - expenseTotalCentsActual;
 
     return res.json({
       month,
-      balance,
-      incomeTotal,
-      expenseTotal,
+      balance: balanceCents,
+      incomeTotal: incomeTotalCents,
+      expenseTotal: expenseTotalCentsActual,
       byCategory,
     });
   } catch (err) {

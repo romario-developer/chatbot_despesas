@@ -55,9 +55,9 @@ function cryptoRandomId() {
 }
 
 function convertPlanningAmount(value: unknown): number {
-  const cents = toCentsBRL(value);
-  if (cents === null || cents < 0) return 0;
-  return cents;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return Math.round(num);
 }
 
 function migratePlanningData(raw: PlanningData): PlanningData {
