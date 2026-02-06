@@ -1,7 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 
 import apiRouter, { API_BASE_PATH } from './api';
 import healthRouter from './routes/health';
@@ -9,6 +9,7 @@ import './utils/dates';
 import { markDbError, markDbReady } from './infra/db/dbState';
 import { prisma } from './infra/db/prisma';
 import userBackupRouter from './routes/userBackup';
+import errorHandler from './api/middleware/errorHandler';
 
 dotenv.config();
 process.env.TZ = 'America/Fortaleza';
@@ -64,17 +65,7 @@ app.use((req: Request, res: Response) => {
   return res.status(404).json({ error: 'Not Found', path: req.originalUrl });
 });
 
-app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
-  if (err?.message === 'Not allowed by CORS') {
-    return res.status(403).json({ error: 'Origin not allowed' });
-  }
-  return next(err);
-});
-
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  console.error('[EXPRESS_ERROR]', req.method, req.originalUrl, err?.stack || err);
-  return res.status(500).json({ error: 'Internal Server Error' });
-});
+app.use(errorHandler);
 
 const CONNECT_MAX_ATTEMPTS = 15;
 const BASE_DELAY_MS = 500;
