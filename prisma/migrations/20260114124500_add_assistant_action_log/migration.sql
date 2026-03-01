@@ -1,7 +1,0 @@
-CREATE TABLE IF NOT EXISTS "AssistantActionLog" (
-  "id" SERIAL PRIMARY KEY,
-  "conversationId" TEXT NOT NULL UNIQUE,
-  "lastEntity" TEXT NOT NULL,
-  "lastEntityId" INTEGER NOT NULL,
-  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
