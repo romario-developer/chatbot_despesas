@@ -17,36 +17,37 @@ enum PaymentMethod {
 }
 
 model User {
-  id          Int            @id @default(autoincrement())
-  telegramId  String?        @unique
-  telegramChatId String?     @unique
-  name        String?
-  email       String?        @unique
-  passwordHash String?
-  mustChangePassword Boolean @default(true)
-  createdAt   DateTime       @default(now())
-  categories  Category[]
-  expenses    Expense[]
+  id                     Int                     @id @default(autoincrement())
+  telegramId             String?                 @unique
+  telegramChatId         String?                 @unique
+  name                   String?
+  email                  String?                 @unique
+  passwordHash           String?
+  mustChangePassword     Boolean                 @default(true)
+  createdAt              DateTime                @default(now())
+  categories             Category[]
+  expenses               Expense[]
   assistantConversations AssistantConversation[]
-  drafts      ExpenseDraft[]
-  session     UserSession?
-  planning    Planning?
-  linkCodes   TelegramLinkCode[]
-  cards       Card[]
-  payments    CardPayment[]
-  installmentGroups InstallmentGroup[]
-  credits     Credit[]
+  drafts                 ExpenseDraft[]
+  session                UserSession?
+  planning               Planning?
+  linkCodes              TelegramLinkCode[]
+  cards                  Card[]
+  payments               CardPayment[]
+  installmentGroups      InstallmentGroup[]
+  credits                Credit[]
+  aiConversations        AiInsightConversation[]
 }
 
 model Category {
-  id             Int            @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   userId         Int
   name           String
   normalizedName String
-  isActive       Boolean        @default(true)
-  createdAt      DateTime       @default(now())
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
 
-  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses Expense[]
   drafts   ExpenseDraft[]
   rules    CategoryRule[]
@@ -65,13 +66,13 @@ model AssistantActionLog {
 }
 
 model AssistantConversation {
-  conversationId String @id
-  userId         Int
-  pendingDraft   Json?
-  pendingQuestion String @default("none")
-  stage          String @default("idle")
-  lastExpenseId  Int?
-  updatedAt      DateTime @updatedAt
+  conversationId  String   @id
+  userId          Int
+  pendingDraft    Json?
+  pendingQuestion String   @default("none")
+  stage           String   @default("idle")
+  lastExpenseId   Int?
+  updatedAt       DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -89,10 +90,10 @@ model Card {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expenses Expense[]
-  expenseDrafts ExpenseDraft[]
-  payments CardPayment[]
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  expenseDrafts     ExpenseDraft[]
+  payments          CardPayment[]
   installmentGroups InstallmentGroup[]
 
   @@index([userId, createdAt])
@@ -121,30 +122,30 @@ model CategoryMemory {
 }
 
 model Expense {
-  id            Int           @id @default(autoincrement())
-  userId        Int
-  categoryId    Int
-  cardId        Int?
-  amountCents   Int
-  paymentMethod PaymentMethod @default(OTHER)
-  categorySource String?
-  description   String
-  date          DateTime
-  source        String
-  rawText       String
+  id                 Int           @id @default(autoincrement())
+  userId             Int
+  categoryId         Int
+  cardId             Int?
+  amountCents        Int
+  paymentMethod      PaymentMethod @default(OTHER)
+  categorySource     String?
+  description        String
+  date               DateTime
+  source             String
+  rawText            String
   installmentCurrent Int?
   installmentTotal   Int?
   purchaseLabel      String?
   postedMonth        String?
   invoiceMonth       String?
-  createdAt     DateTime      @default(now())
+  createdAt          DateTime      @default(now())
   installmentGroupId String?
-  installmentIndex   Int  @default(1)
-  installmentsTotal  Int  @default(1)
+  installmentIndex   Int           @default(1)
+  installmentsTotal  Int           @default(1)
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  card     Card?    @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  card             Card?             @relation(fields: [cardId], references: [id], onDelete: SetNull)
   installmentGroup InstallmentGroup? @relation(fields: [installmentGroupId], references: [id])
 
   @@index([userId, createdAt])
@@ -160,35 +161,35 @@ model Expense {
 }
 
 model ExpenseDraft {
-  id          String    @id @default(cuid())
-  userId      Int
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amountCents Int
-  description String
-  date        DateTime
-  categoryId  Int
-  category    Category  @relation(fields: [categoryId], references: [id])
-  cardId      Int?
+  id            String        @id @default(cuid())
+  userId        Int
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountCents   Int
+  description   String
+  date          DateTime
+  categoryId    Int
+  category      Category      @relation(fields: [categoryId], references: [id])
+  cardId        Int?
   paymentMethod PaymentMethod @default(OTHER)
-  card        Card?     @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  rawText     String
-  createdAt   DateTime  @default(now())
+  card          Card?         @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  rawText       String
+  createdAt     DateTime      @default(now())
 
   @@index([userId, createdAt])
   @@index([cardId])
 }
 
 model InstallmentGroup {
-  id                 String    @id @default(cuid())
-  userId             Int
-  cardId             Int
-  descriptionBase    String
-  totalAmountCents   Int
-  installmentsTotal  Int
-  createdAt          DateTime  @default(now())
+  id                String   @id @default(cuid())
+  userId            Int
+  cardId            Int
+  descriptionBase   String
+  totalAmountCents  Int
+  installmentsTotal Int
+  createdAt         DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card     Card      @relation(fields: [cardId], references: [id], onDelete: Cascade)
   expenses Expense[]
 
   @@index([userId, cardId])
@@ -210,14 +211,14 @@ model CardPayment {
 }
 
 model UserSession {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mode      String?
-  draftId   String?
-  resetToken String?
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @unique
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode                String?
+  draftId             String?
+  resetToken          String?
   resetTokenExpiresAt DateTime?
-  updatedAt DateTime @updatedAt
+  updatedAt           DateTime  @updatedAt
 }
 
 model Planning {
@@ -272,4 +273,20 @@ model BackupEvent {
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+model AiInsightConversation {
+  // O ID da conversa será um texto (UUID), não mude isso.
+  id String @id @default(uuid())
+
+  // O ID do usuário que fará a relação. Como o erro anterior exigiu mudança, 
+  // assumimos que a chave do seu modelo User é Int.
+  userId Int
+
+  user      User     @relation(fields: [userId], references: [id])
+  history   Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
