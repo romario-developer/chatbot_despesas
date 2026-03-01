@@ -36,7 +36,7 @@ model User {
   payments               CardPayment[]
   installmentGroups      InstallmentGroup[]
   credits                Credit[]
-  aiConversations        AiInsightConversation[]
+  aiInsightConversations AiInsightConversation[]
 }
 
 model Category {
@@ -276,13 +276,8 @@ model BackupEvent {
 }
 
 model AiInsightConversation {
-  // O ID da conversa será um texto (UUID), não mude isso.
-  id String @id @default(uuid())
-
-  // O ID do usuário que fará a relação. Como o erro anterior exigiu mudança, 
-  // assumimos que a chave do seu modelo User é Int.
-  userId Int
-
+  id        String   @id @default(uuid())
+  userId    Int
   user      User     @relation(fields: [userId], references: [id])
   history   Json     @default("[]")
   createdAt DateTime @default(now())

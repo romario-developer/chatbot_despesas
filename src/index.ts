@@ -12,7 +12,7 @@ import userBackupRouter from './routes/userBackup';
 import errorHandler from './api/middleware/errorHandler';
 
 dotenv.config();
-process.env.TZ = 'America/Bahia';
+process.env.TZ = 'America/Fortaleza';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[FATAL] unhandledRejection:', (reason as any)?.stack || reason);

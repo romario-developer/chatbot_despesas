@@ -12,15 +12,13 @@ import {
 import { dayjs, TZ } from "../../utils/dates";
 import { formatCurrency } from "../../utils/money";
 
-// IMPORTANTE: Importando o Prisma Client para persistência
-import { prisma } from "../../infra/db/prisma";
-
 const router = Router();
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 const HISTORY_DEPTH = 12;
 const DEV_MODE = process.env.NODE_ENV !== "production";
 
 type ConversationMessage = { role: "user" | "assistant"; text: string; at: number };
+const conversationHistory = new Map<string, ConversationMessage[]>();
 
 const requestSchema = z.object({
   message: z.string().min(1),
@@ -30,34 +28,11 @@ const requestSchema = z.object({
 
 const monthKeywords = ["mês", "mes", "saldo", "gasto", "despesa", "receita", "cartão", "cartao", "fatura", "planejamento", "meta", "parcela", "parcelas", "comparar", "fechar"];
 
-// NOVA FUNÇÃO pushHistory: Agora é assíncrona e salva direto no PostgreSQL
-async function pushHistory(userId: number, conversationId: string, role: "user" | "assistant", text: string) {
-  let conversation = await prisma.aiInsightConversation.findUnique({
-    where: { id: conversationId },
-  });
-
-  let existingHistory: ConversationMessage[] = [];
-
-  if (conversation) {
-    existingHistory = (conversation.history as unknown as ConversationMessage[]) || [];
-  } else {
-    conversation = await prisma.aiInsightConversation.create({
-      data: {
-        id: conversationId,
-        userId: userId,
-        history: [],
-      }
-    });
-  }
-
-  const nextHistory = [...existingHistory, { role, text, at: Date.now() }].slice(-HISTORY_DEPTH);
-
-  await prisma.aiInsightConversation.update({
-    where: { id: conversationId },
-    data: { history: nextHistory as any },
-  });
-
-  return nextHistory;
+function pushHistory(id: string, role: "user" | "assistant", text: string) {
+  const existing = conversationHistory.get(id) ?? [];
+  const next = [...existing, { role, text, at: Date.now() }].slice(-HISTORY_DEPTH);
+  conversationHistory.set(id, next);
+  return next;
 }
 
 function needsMonthClarification(text: string) {
@@ -98,7 +73,7 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
           title: item.category,
           value: item.total,
           formattedValue: formatCurrency(item.total),
-          percent: Number(((item.total / (summary.totalExpensesCents || 1)) * 100).toFixed(1)),
+        percent: Number(((item.total / (summary.totalExpensesCents || 1)) * 100).toFixed(1)),
         })),
       },
     });
@@ -153,7 +128,7 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
       data: {
         value: difference,
         currency: "BRL",
-        detail: `Planejado: ${formatCurrency(plannedTotal)} • Realizado: ${formatCurrency(summary.totalExpensesCents)}`,
+    detail: `Planejado: ${formatCurrency(plannedTotal)} • Realizado: ${formatCurrency(summary.totalExpensesCents)}`,
       },
     });
   }
@@ -202,16 +177,11 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
   const currentMonth = dayjs().tz(TZ).format("YYYY-MM");
   const conversationId = providedId || randomUUID();
-  
-  // AWAIT ADICIONADO AQUI
-  await pushHistory(user.id, conversationId, "user", message);
+  pushHistory(conversationId, "user", message);
 
   if (!providedMonth && needsMonthClarification(message)) {
     const clarification = `Para responder com números reais, me diga qual mês você quer analisar (formato YYYY-MM). Posso usar ${currentMonth} como padrão.`;
-    
-    // AWAIT ADICIONADO AQUI
-    await pushHistory(user.id, conversationId, "assistant", clarification);
-    
+    pushHistory(conversationId, "assistant", clarification);
     return res.status(200).json({
       conversationId,
       assistantMessage: clarification,
@@ -226,10 +196,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
   const targetMonth = providedMonth || currentMonth;
   try {
     const payload = await buildAssistantResponse(user.id, targetMonth, message);
-    
-    // AWAIT ADICIONADO AQUI
-    await pushHistory(user.id, conversationId, "assistant", payload.assistantMessage);
-    
+    pushHistory(conversationId, "assistant", payload.assistantMessage);
     const response: any = {
       conversationId,
       assistantMessage: payload.assistantMessage,
@@ -243,10 +210,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
   } catch (err) {
     console.error("[ai/chat] erro", err);
     const fallbackMessage = "Não consegui gerar os insights agora, tente novamente em instantes.";
-    
-    // AWAIT ADICIONADO AQUI
-    await pushHistory(user.id, conversationId, "assistant", fallbackMessage);
-    
+    pushHistory(conversationId, "assistant", fallbackMessage);
     return res.status(200).json({
       conversationId,
       assistantMessage: fallbackMessage,
