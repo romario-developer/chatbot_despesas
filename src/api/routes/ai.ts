@@ -100,11 +100,14 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
           invoices: openInvoices.map((invoice) => ({
             cardName: invoice.cardName,
             remaining: invoice.remaining,
-            formattedRemaining: formatCurrency(invoice.remaining),
+            // 👇 CORREÇÃO DO BUG DOS R$ 7,51 AQUI 👇
+            formattedRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(invoice.remaining),
             dueDate: invoice.dueDate,
+            purchases: invoice.purchases 
           })),
           totalRemaining: openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0),
-          formattedTotalRemaining: formatCurrency(openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0)),
+          // 👇 CORREÇÃO DO BUG DO TOTAL GERAL AQUI 👇
+          formattedTotalRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0)),
         },
       });
     }

@@ -157,6 +157,8 @@ export async function tool_getOpenInvoices(userId: number) {
           description: purchase.description,
           amount: centsToNumber(purchase.amountCents),
           date: dayjs(purchase.date).tz(TZ).format("YYYY-MM-DD"),
+          installmentCurrent: purchase.installmentCurrent,
+          installmentTotal: purchase.installmentTotal      
         })),
       };
     }),
