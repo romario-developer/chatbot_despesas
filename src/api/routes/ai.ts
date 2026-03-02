@@ -69,6 +69,18 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     });
   }
 
+  // Exemplo de como enviar os dados do gráfico no seu backend (ai.ts)
+cards.push({
+  type: "chart",
+  title: "Gastos por Categoria",
+  data: [
+    { name: "Mercado", value: 400 },
+    { name: "Lazer", value: 300 },
+    { name: "Transporte", value: 200 },
+    { name: "Saúde", value: 100 },
+  ]
+});
+
   if (topEntries.length) {
     cards.push({
       type: "list",
