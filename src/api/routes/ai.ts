@@ -84,12 +84,16 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
       type: "list",
       title: "Maiores gastos do mês",
       data: {
-        items: topEntries.map((entry) => ({
-          title: entry.description,
-          subtitle: `${entry.category} • ${entry.date}`,
-          value: entry.amount,
-          formattedValue: formatCurrency(entry.amount),
-        })),
+        items: topEntries.map((entry) => {
+          // CORREÇÃO DOS CENTAVOS AQUI: Multiplicamos por 100
+          const valueInCents = Math.round(entry.amount * 100); 
+          return {
+            title: entry.description,
+            subtitle: `${entry.category} • ${entry.date}`,
+            value: valueInCents,
+            formattedValue: formatCurrency(valueInCents),
+          };
+        }),
       },
     });
   }
