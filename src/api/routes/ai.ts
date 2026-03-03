@@ -133,22 +133,36 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       6. "set_budget": Definir limite/meta de gastos de uma categoria.
       7. "set_salary": Definir salário mensal do usuário.
       8. "add_extra": Adicionar um ganho extra / freela / bônus.
-      9. "set_savings": Definir o valor que foi guardado na poupança / reserva.
+      9. "set_savings": Definir o valor guardado na poupança/reserva.
       10. "set_name": Salvar o nome inicial do usuário.
 
-      Formato de Saída OBRIGATÓRIO:
+      Formato de Saída OBRIGATÓRIO (Gere apenas o JSON, sem marcadores):
       {
         "intent": "chat" | "expense" | "dashboard" | "delete_last" | "compare" | "set_budget" | "set_salary" | "add_extra" | "set_savings" | "set_name",
-        "extractedName": "Nome capitalizado extraído. Vazio se não for set_name",
+        "extractedName": "Nome capitalizado se set_name. Vazio caso contrário.",
         "targetMonth": "${currentMonth}", 
-        "reply": "Sua resposta humanizada",
-        "expenseDetails": { "description": "Nome do item ou categoria", "amount": 0, "method": "PIX", "category": "Categoria" }
+        "reply": "Sua resposta amigável",
+        "expenseDetails": { 
+          "description": "Nome do item ou categoria", 
+          "amount": "AQUI VAI O NÚMERO EXATO DO VALOR DA MENSAGEM (OBRIGATÓRIO)", 
+          "method": "PIX", 
+          "category": "Categoria" 
+        }
       }
     `;
 
     const result = await aiModel.generateContent(prompt);
     let textoResposta = result.response.text().trim().replace(/```json/g, "").replace(/```/g, "").trim();
-    const aiDecision = JSON.parse(textoResposta);
+    
+    // Tratamento robusto para evitar o crash caso a IA fuja do JSON
+    let aiDecision;
+    try {
+      const jsonMatch = textoResposta.match(/\{[\s\S]*\}/);
+      aiDecision = JSON.parse(jsonMatch ? jsonMatch[0] : textoResposta);
+    } catch (parseErr) {
+      console.error("Erro no Parse JSON da IA:", textoResposta);
+      return res.status(200).json({ conversationId, assistantMessage: "Desculpe, meu cérebro deu um nó na formatação dessa mensagem! Pode me falar isso de novo de forma mais direta?" });
+    }
 
     // --- 0. SALVAR NOME ---
     if (aiDecision.intent === "set_name" && aiDecision.extractedName) {
@@ -156,51 +170,70 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || `Muito prazer, ${aiDecision.extractedName}! Já gravei seu nome aqui.`, refreshData: true });
     }
 
-    // --- 1. SALÁRIO, RESERVAS E EXTRAS ---
+    // --- 1. SALÁRIO E RESERVAS E EXTRAS (Com Parser Reforçado) ---
     if (["set_salary", "set_savings", "add_extra"].includes(aiDecision.intent)) {
       try {
-        const rawAmount = aiDecision.expenseDetails?.amount;
+        let rawAmount = aiDecision.expenseDetails?.amount;
+        
+        // RESGATE: Se a IA enviar nulo ou zero, tentamos extrair o número direto da frase original!
+        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
+          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
+          if (match) rawAmount = match[0].replace(',', '.');
+        }
+
         const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
 
         if (isNaN(amountCents) || amountCents <= 0) {
-          return res.status(200).json({ conversationId, assistantMessage: "Não consegui identificar o valor exato. Pode mandar de novo com o número claro?" });
+          return res.status(200).json({ conversationId, assistantMessage: "Não consegui identificar o valor exato na mensagem. Poderia tentar de novo com o número claro? (Ex: 'Salário 1600')" });
         }
 
         let planning = await prisma.planning.findFirst({ where: { userId: user.id } });
         if (!planning) planning = await prisma.planning.create({ data: { userId: user.id, data: { salaryByMonth: {}, extrasByMonth: {}, savingsByMonth: {}, categoryBudgets: {} } } });
 
-        const currentData = (planning.data as any) || {};
+        // Clone profundo para não perder nada!
+        const currentData = JSON.parse(JSON.stringify(planning.data || {}));
+        
+        if (!currentData.salaryByMonth) currentData.salaryByMonth = {};
+        if (!currentData.savingsByMonth) currentData.savingsByMonth = {};
+        if (!currentData.extrasByMonth) currentData.extrasByMonth = {};
 
         if (aiDecision.intent === "set_salary") {
-          currentData.salaryByMonth = { ...(currentData.salaryByMonth || {}), [currentMonth]: amountCents };
+          currentData.salaryByMonth[currentMonth] = amountCents;
         } else if (aiDecision.intent === "set_savings") {
-          currentData.savingsByMonth = { ...(currentData.savingsByMonth || {}), [currentMonth]: amountCents };
+          currentData.savingsByMonth[currentMonth] = amountCents;
         } else if (aiDecision.intent === "add_extra") {
-          if (!currentData.extrasByMonth) currentData.extrasByMonth = {};
           if (!currentData.extrasByMonth[currentMonth]) currentData.extrasByMonth[currentMonth] = [];
-          currentData.extrasByMonth[currentMonth].push({ id: `id-${Date.now()}`, date: new Date().toISOString().split("T")[0], description: aiDecision.expenseDetails.description || "Ganho Extra", amount: amountCents });
+          currentData.extrasByMonth[currentMonth].push({ id: `id-${Date.now()}`, date: new Date().toISOString().split("T")[0], description: aiDecision.expenseDetails?.description || "Ganho Extra", amount: amountCents });
         }
 
         await prisma.planning.update({ where: { id: planning.id }, data: { data: currentData } });
 
-        return res.status(200).json({ conversationId, assistantMessage: `✅ Tudo certo, ${userName}! Já registrei o valor de **${formatCurrency(amountCents)}** no seu planejamento. 💸`, refreshData: true });
+        const isSal = aiDecision.intent === "set_salary";
+        const isSav = aiDecision.intent === "set_savings";
+        const msg = isSal ? `✅ Seu salário de **${formatCurrency(amountCents)}** foi registrado!` : isSav ? `✅ Guardei **${formatCurrency(amountCents)}** na sua reserva!` : `✅ Ganho extra de **${formatCurrency(amountCents)}** registrado!`;
+
+        return res.status(200).json({ conversationId, assistantMessage: msg, refreshData: true });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Ops, não consegui salvar no planejamento. Pode tentar de novo?" });
+        return res.status(200).json({ conversationId, assistantMessage: "Ops, erro ao salvar no planejamento. Tente novamente." });
       }
     }
 
-    // --- 2. DEFINIR META (SET_BUDGET) PADRONIZADO MINÚSCULO ---
+    // --- 2. DEFINIR META (Com Parser Reforçado) ---
     if (aiDecision.intent === "set_budget") {
       try {
-        const rawAmount = aiDecision.expenseDetails?.amount;
+        let rawAmount = aiDecision.expenseDetails?.amount;
+        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
+          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
+          if (match) rawAmount = match[0].replace(',', '.');
+        }
+
         const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
         const categoryName = aiDecision.expenseDetails?.category;
 
         if (isNaN(amountCents) || amountCents <= 0 || !categoryName) {
-          return res.status(200).json({ conversationId, assistantMessage: "Não consegui pegar o valor ou a categoria da meta. Pode mandar novamente?" });
+          return res.status(200).json({ conversationId, assistantMessage: "Não consegui pegar o valor ou a categoria da meta. Pode mandar de forma direta? (Ex: Meta Lazer 200)" });
         }
 
-        // CHAVE MESTRA: Salva e pesquisa a categoria SEMPRE minúscula e sem espaços extras
         const safeCategoryKey = categoryName.toLowerCase().trim();
 
         let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName: safeCategoryKey } });
@@ -209,35 +242,37 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         let planning = await prisma.planning.findFirst({ where: { userId: user.id } });
         if (!planning) planning = await prisma.planning.create({ data: { userId: user.id, data: { categoryBudgets: {} } } });
 
-        const currentData = (planning.data as any) || {};
+        const currentData = JSON.parse(JSON.stringify(planning.data || {}));
         if (!currentData.categoryBudgets) currentData.categoryBudgets = {};
         
-        // SALVA COM A CHAVE SEGURA
         currentData.categoryBudgets[safeCategoryKey] = amountCents;
 
         await prisma.planning.update({ where: { id: planning.id }, data: { data: currentData } });
 
-        return res.status(200).json({ conversationId, assistantMessage: `✅ Meta para **${category.name}** definida em **${formatCurrency(amountCents)}**.`, refreshData: true });
+        return res.status(200).json({ conversationId, assistantMessage: `✅ Meta para **${category.name}** definida com o teto de **${formatCurrency(amountCents)}**.`, refreshData: true });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Problema técnico ao salvar a meta. Pode tentar de novo?" });
+        return res.status(200).json({ conversationId, assistantMessage: "Problema técnico ao salvar a meta. Tente de novo." });
       }
     }
 
     // --- 3. REGISTRAR DESPESA ---
     if (aiDecision.intent === "expense") {
       try {
-        const rawAmount = aiDecision.expenseDetails?.amount;
+        let rawAmount = aiDecision.expenseDetails?.amount;
+        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
+          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
+          if (match) rawAmount = match[0].replace(',', '.');
+        }
+
         const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
         const categoryName = aiDecision.expenseDetails?.category || "Outros";
-        
-        // Usa a chave segura para buscar e alertar a meta
         const safeCategoryKey = categoryName.toLowerCase().trim();
         
         let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName: safeCategoryKey } });
         if (!category) category = await prisma.category.create({ data: { userId: user.id, name: categoryName, normalizedName: safeCategoryKey } });
 
         await prisma.expense.create({
-          data: { userId: user.id, categoryId: category.id, amountCents, paymentMethod: aiDecision.expenseDetails.method, description: aiDecision.expenseDetails.description, date: new Date(), source: 'AI_CHAT', rawText: message }
+          data: { userId: user.id, categoryId: category.id, amountCents, paymentMethod: aiDecision.expenseDetails?.method || "OTHER", description: aiDecision.expenseDetails?.description || "Gasto", date: new Date(), source: 'AI_CHAT', rawText: message }
         });
 
         const summary = await tool_getDashboardSummary(user.id, currentMonth);
@@ -245,8 +280,6 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         
         const currentData = (planning?.data as any) || {};
         const budgets = currentData.categoryBudgets || {};
-        
-        // Busca a meta usando a chave segura
         const budgetCents = budgets[safeCategoryKey] || 0;
         
         const catSummary = summary.totalPorCategoria.find(c => c.category.toLowerCase().trim() === safeCategoryKey);
@@ -256,31 +289,25 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         if (budgetCents > 0) {
           const percentual = (totalGastoAtual / budgetCents) * 100;
           if (percentual >= 100) alertaBudget = `\n\n🚨 **ESTOUROU!** Você já passou da meta de ${categoryName}!`;
-          else if (percentual >= 80) alertaBudget = `\n\n⚠️ **ATENÇÃO:** Você atingiu ${percentual.toFixed(0)}% da meta de ${categoryName}. Resta ${formatCurrency(budgetCents - totalGastoAtual)}!`;
+          else if (percentual >= 80) alertaBudget = `\n\n⚠️ **ATENÇÃO:** Atingiu ${percentual.toFixed(0)}% da meta de ${categoryName}. Resta ${formatCurrency(budgetCents - totalGastoAtual)}!`;
         }
 
-        return res.status(200).json({ conversationId, assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 ${formatCurrency(amountCents)}\n📂 ${categoryName}`, refreshData: true });
+        return res.status(200).json({ conversationId, assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Gasto Salvo: **${formatCurrency(amountCents)}**`, refreshData: true });
       } catch (dbError) {
-        return res.status(200).json({ conversationId, assistantMessage: "Ops, dei um tropeço aqui ao salvar esse lançamento. Pode mandar de novo? 🙏" });
+        return res.status(200).json({ conversationId, assistantMessage: "Ops, não consegui salvar esse gasto no banco. Tente novamente." });
       }
     }
 
-    // --- 4. APAGAR ÚLTIMO ---
     if (aiDecision.intent === "delete_last") {
       try {
         const lastExpense = await prisma.expense.findFirst({ where: { userId: user.id }, orderBy: { id: 'desc' } });
         if (!lastExpense) return res.status(200).json({ conversationId, assistantMessage: "Nenhum lançamento recente encontrado." });
-        
         await prisma.expense.delete({ where: { id: lastExpense.id } });
         return res.status(200).json({ conversationId, assistantMessage: `🗑️ Apaguei: **${lastExpense.description}**.`, refreshData: true });
-      } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Putz, não consegui apagar a última despesa. Pode tentar de novo? 😅" });
-      }
+      } catch (err) { return res.status(200).json({ conversationId, assistantMessage: "Problema ao apagar." }); }
     }
 
-    // --- 5. COMPARAÇÃO E DASHBOARD ---
     if (aiDecision.intent === "compare") {
-      // ... (Restante do código de comparação mantido igual)
       try {
         const month1 = aiDecision.targetMonth || currentMonth;
         const month2 = aiDecision.compareMonth || lastMonth;
@@ -291,14 +318,12 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
         const cards = [{
           type: "metric", title: `Comparativo: ${month1} vs ${month2}`,
-          data: { value: economizou ? Math.abs(diffCents) : -Math.abs(diffCents), currency: "BRL", detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}` }
+          data: { value: Math.abs(diffCents), currency: "BRL", detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}` }
         }];
 
         let resposta = aiDecision.reply || (economizou ? `Gastou **${formatCurrency(Math.abs(diffCents))} a menos**.` : `Gastou **${formatCurrency(Math.abs(diffCents))} a mais**.`);
         return res.status(200).json({ conversationId, assistantMessage: resposta, cards, suggestedActions: [] });
-      } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Não conseguir comparar, pode me mandar novamente de forma mais clara? 😅." });
-      }
+      } catch (err) { return res.status(200).json({ conversationId, assistantMessage: "Não consegui comparar. Tente novamente de forma mais clara." }); }
     }
 
     if (aiDecision.intent === "dashboard") {
@@ -306,11 +331,11 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || payload.assistantMessage, cards: payload.cards, suggestedActions: payload.suggestedActions });
     }
 
-    // --- 6. CHAT GENÉRICO ---
     return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply, cards: [], suggestedActions: [{ label: "Ver resumos" }] });
 
   } catch (err) {
-    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento." });
+    console.error("Erro Fatal IA:", err);
+    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho." });
   }
 });
 
