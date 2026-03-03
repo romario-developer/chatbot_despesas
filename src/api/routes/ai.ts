@@ -28,11 +28,9 @@ const requestSchema = z.object({
   conversationId: z.string().optional(),
 });
 
-// --- NOVO: FILTRO EXTRATOR DE VALORES A PROVA DE FALHAS ---
+// --- FILTRO EXTRATOR DE VALORES A PROVA DE FALHAS ---
 function extractMoneyCents(aiAmount: any, userText: string): number {
   let val = Number(aiAmount);
-  
-  // Se a IA falhou em devolver um número, caçamos o número direto no texto do usuário!
   if (isNaN(val) || val <= 0) {
     const matches = userText.match(/\d+(?:[.,]\d+)*/g);
     if (matches && matches.length > 0) {
@@ -45,7 +43,6 @@ function extractMoneyCents(aiAmount: any, userText: string): number {
       val = Number(strVal);
     }
   }
-
   if (!isNaN(val) && val > 0) {
     return Math.round(val * 100);
   }
@@ -144,7 +141,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
       COMPORTAMENTO E PERSONALIDADE:
       ${isNewUser ? 
-        `- O NOME DO USUÁRIO ESTÁ VAZIO. Se a mensagem for um nome, classifique OBRIGATORIAMENTE como "set_name". Responda confirmando que gravou o nome e seja simpático (ex: "Muito prazer, [Nome]!").` : 
+        `- O NOME DO USUÁRIO ESTÁ VAZIO. Se a mensagem for um nome, classifique OBRIGATORIAMENTE como "set_name". Responda confirmando que gravou o nome e seja simpático.` : 
         `- O usuário se chama ${userName}. Chame-o pelo nome de forma natural.`
       }
 
@@ -155,9 +152,9 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       4. "delete_last": Apagar último lançamento.
       5. "compare": Comparar meses.
       6. "set_budget": Definir limite/meta de gastos de uma categoria.
-      7. "set_salary": Definir salário mensal do usuário.
-      8. "add_extra": Adicionar um ganho extra / freela / bônus.
-      9. "set_savings": Definir o valor guardado na poupança/reserva.
+      7. "set_salary": Definir salário mensal.
+      8. "add_extra": Adicionar ganho extra / freela.
+      9. "set_savings": Definir valor guardado na reserva.
       10. "set_name": Salvar o nome inicial do usuário.
 
       Formato de Saída OBRIGATÓRIO (Gere apenas o JSON):
@@ -168,9 +165,10 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         "reply": "Sua resposta amigável",
         "expenseDetails": { 
           "description": "Nome curto do item", 
-          "amount": 0, // Substitua pelo valor numérico extraído da mensagem (Ex: 1600)
-          "method": "PIX", 
-          "category": "Categoria" 
+          "amount": 0, // Valor TOTAL (apenas números)
+          "method": "CREDIT", // USE APENAS: CREDIT, DEBIT, PIX, CASH, TRANSFER ou OTHER
+          "category": "Categoria",
+          "installments": 1 // Número de parcelas (inteiro). Use 1 se for à vista.
         }
       }
     `;
@@ -192,7 +190,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || `Muito prazer, ${aiDecision.extractedName}! Já gravei seu nome aqui.`, refreshData: true });
     }
 
-    // --- 1. SALÁRIO E RESERVAS E EXTRAS (Com Parser Blindado) ---
+    // --- 1. SALÁRIO E RESERVAS E EXTRAS ---
     if (["set_salary", "set_savings", "add_extra"].includes(aiDecision.intent)) {
       try {
         const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
@@ -230,7 +228,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       }
     }
 
-    // --- 2. DEFINIR META (Com Parser Blindado) ---
+    // --- 2. DEFINIR META ---
     if (aiDecision.intent === "set_budget") {
       try {
         const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
@@ -261,13 +259,13 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       }
     }
 
-    // --- 3. REGISTRAR DESPESA (Com Parser Blindado) ---
+    // --- 3. REGISTRAR DESPESA (AGORA ENTENDE PARCELAS E CARTÃO) ---
     if (aiDecision.intent === "expense") {
       try {
         const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
         
         if (amountCents === 0) {
-           return res.status(200).json({ conversationId, assistantMessage: "Romário, não achei o valor da despesa na sua frase. Pode mandar de novo? (Ex: 'Gastei 50 no mercado')" });
+           return res.status(200).json({ conversationId, assistantMessage: "Não achei o valor da despesa na sua frase. Pode mandar de novo? (Ex: 'Gastei 50 no mercado')" });
         }
 
         const categoryName = aiDecision.expenseDetails?.category || "Outros";
@@ -276,8 +274,36 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName: safeCategoryKey } });
         if (!category) category = await prisma.category.create({ data: { userId: user.id, name: categoryName, normalizedName: safeCategoryKey } });
 
+        // BLINDAGEM DO MÉTODO DE PAGAMENTO (Evita o erro do banco de dados)
+        const validMethods = ["CREDIT", "DEBIT", "PIX", "CASH", "TRANSFER", "OTHER"];
+        let method = (aiDecision.expenseDetails?.method || "OTHER").toUpperCase();
+        
+        if (!validMethods.includes(method)) {
+            const msgLower = message.toLowerCase();
+            if (msgLower.includes("cartão") || msgLower.includes("crédito") || msgLower.includes("credit") || msgLower.includes("dividido") || msgLower.includes("x")) method = "CREDIT";
+            else if (msgLower.includes("débito") || msgLower.includes("debit")) method = "DEBIT";
+            else if (msgLower.includes("pix")) method = "PIX";
+            else method = "OTHER";
+        }
+
+        // TRATAMENTO INTELIGENTE DE PARCELAS
+        const installments = aiDecision.expenseDetails?.installments || 1;
+        let finalDescription = aiDecision.expenseDetails?.description || "Gasto";
+        if (installments > 1) {
+            finalDescription += ` (${installments}x)`;
+        }
+
         await prisma.expense.create({
-          data: { userId: user.id, categoryId: category.id, amountCents, paymentMethod: aiDecision.expenseDetails?.method || "OTHER", description: aiDecision.expenseDetails?.description || "Gasto", date: new Date(), source: 'AI_CHAT', rawText: message }
+          data: { 
+            userId: user.id, 
+            categoryId: category.id, 
+            amountCents, 
+            paymentMethod: method as any, 
+            description: finalDescription, 
+            date: new Date(), 
+            source: 'AI_CHAT', 
+            rawText: message 
+          }
         });
 
         const summary = await tool_getDashboardSummary(user.id, currentMonth);
@@ -297,8 +323,9 @@ router.post("/chat", async (req: AuthedRequest, res) => {
           else if (percentual >= 80) alertaBudget = `\n\n⚠️ **ATENÇÃO:** Atingiu ${percentual.toFixed(0)}% da meta de ${categoryName}. Resta ${formatCurrency(budgetCents - totalGastoAtual)}!`;
         }
 
-        return res.status(200).json({ conversationId, assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Gasto Salvo: **${formatCurrency(amountCents)}**`, refreshData: true });
+        return res.status(200).json({ conversationId, assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Salvo!\n🛒 **${finalDescription}**\n💰 ${formatCurrency(amountCents)}\n💳 ${method}`, refreshData: true });
       } catch (dbError) {
+        console.error("Erro Prisma Expense:", dbError);
         return res.status(200).json({ conversationId, assistantMessage: "Ops, não consegui salvar esse gasto no banco. Tente novamente." });
       }
     }
