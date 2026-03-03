@@ -14,7 +14,6 @@ import { dayjs, TZ } from "../../utils/dates";
 import { formatCurrency } from "../../utils/money";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Inicializa o Prisma e a IA do Google
 const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const aiModel = genAI.getGenerativeModel({
@@ -69,17 +68,15 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     });
   }
 
-  // Exemplo de como enviar os dados do gráfico no seu backend (ai.ts)
-cards.push({
-  type: "chart",
-  title: "Gastos por Categoria",
-  data: [
-    { name: "Mercado", value: 400 },
-    { name: "Lazer", value: 300 },
-    { name: "Transporte", value: 200 },
-    { name: "Saúde", value: 100 },
-  ]
-});
+  // Gráfico da IA
+  cards.push({
+    type: "chart",
+    title: "Gastos por Categoria",
+    data: summary.totalPorCategoria.slice(0, 4).map(item => ({
+      name: item.category,
+      value: item.total
+    }))
+  });
 
   if (topEntries.length) {
     cards.push({
@@ -112,13 +109,11 @@ cards.push({
           invoices: openInvoices.map((invoice) => ({
             cardName: invoice.cardName,
             remaining: invoice.remaining,
-            // 👇 CORREÇÃO DO BUG DOS R$ 7,51 AQUI 👇
             formattedRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(invoice.remaining),
             dueDate: invoice.dueDate,
             purchases: invoice.purchases 
           })),
           totalRemaining: openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0),
-          // 👇 CORREÇÃO DO BUG DO TOTAL GERAL AQUI 👇
           formattedTotalRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0)),
         },
       });
@@ -143,9 +138,8 @@ cards.push({
 
   const previousMonth = dayjs(`${targetMonth}-01`).tz(TZ).subtract(1, "month").format("YYYY-MM");
   const suggestedActions = [
-    { id: "ai-top-expenses", label: "Ver 10 maiores gastos", payload: { kind: "topEntries", month: targetMonth } },
-    { id: "ai-compare-month", label: "Comparar com mês anterior", payload: { kind: "compareMonth", month: previousMonth } },
-    { id: "ai-show-open-invoices", label: "Mostrar faturas em aberto", payload: { kind: "openInvoices" } },
+    { id: "ai-top-expenses", label: "Ver maiores gastos", payload: { kind: "topEntries", month: targetMonth } },
+    { id: "ai-compare-month", label: "Comparar com mês passado", payload: { kind: "compareMonth", month: previousMonth } }
   ];
 
   const baseMessage = `No mês de ${targetMonth} você teve ${summary.expensesCount} lançamentos, totalizando ${formatCurrency(summary.totalExpensesCents)}. O saldo em conta está em ${formatCurrency(summary.balanceCents)}.`;
@@ -169,30 +163,33 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
   const conversationId = providedId || randomUUID();
   const currentMonth = dayjs().tz(TZ).format("YYYY-MM");
+  const lastMonth = dayjs().tz(TZ).subtract(1, "month").format("YYYY-MM");
 
   try {
+    const userCategories = await prisma.category.findMany({ where: { userId: user.id } });
+    const categoryNames = userCategories.map(c => c.name).join(", ");
+
     const prompt = `
-      Você é a inteligência artificial do aplicativo financeiro "ChatDespesas". 
-      Mês atual: ${currentMonth}. Mensagem do usuário: "${message}"
+      Você é um consultor financeiro inteligente do app "Financio". Mês atual: ${currentMonth}.
+      O usuário possui estas categorias: [${categoryNames || "Nenhuma ainda"}].
+      Mensagem do usuário: "${message}"
 
-      Sua tarefa é agir como uma pessoa real, simpática e inteligente. Retorne APENAS um objeto JSON válido, sem \`\`\`.
+      Seu objetivo é analisar o texto e retornar APENAS um objeto JSON válido, sem usar \`\`\`json.
 
-      Regras de Classificação ("intent"):
-      1. "chat": Saudação, dúvidas gerais, ou relatar gasto SEM valor numérico.
-      2. "expense": Gasto contendo OBRIGATORIAMENTE valor numérico e descrição ("gastei 50 de gasolina").
-      3. "dashboard": Pedir para ver relatórios, resumos, saldos ou gráficos.
+      Regras de Intenção (intent):
+      1. "chat": Saudação, dúvidas gerais.
+      2. "expense": Registrar um gasto numérico. Se a categoria não existir, CRIE UMA NOVA IDEAL. Dê conselhos financeiros se achar o gasto fútil.
+      3. "dashboard": Pedir para ver relatórios, resumos.
+      4. "delete_last": O usuário pediu para apagar ou desfazer o último lançamento.
+      5. "compare": O usuário pediu para comparar os gastos entre dois meses (ex: "gastei mais esse mês do que o passado?", "comparar março e fevereiro").
 
-      Formato de Saída OBRIGATÓRIO (Mapeie o método de pagamento EXATAMENTE para as opções do method):
+      Formato de Saída OBRIGATÓRIO (Mapeie method para CREDIT, PIX, DEBIT, CASH, TRANSFER ou OTHER):
       {
-        "intent": "chat" | "expense" | "dashboard",
-        "targetMonth": "${currentMonth}",
-        "reply": "Resposta natural e empática. Se for lançar despesa, comemore e confirme os dados.",
-        "expenseDetails": { 
-          "description": "nome do gasto", 
-          "amount": 0, 
-          "method": "CREDIT" | "PIX" | "DEBIT" | "CASH" | "TRANSFER" | "OTHER",
-          "category": "Alimentação" | "Transporte" | "Lazer" | "Saúde" | "Casa" | "Outros"
-        }
+        "intent": "chat" | "expense" | "dashboard" | "delete_last" | "compare",
+        "targetMonth": "${currentMonth}", 
+        "compareMonth": "${lastMonth}", 
+        "reply": "Sua resposta humana aqui",
+        "expenseDetails": { "description": "Nome", "amount": 0, "method": "PIX", "category": "NomeDaCategoria" }
       }
     `;
 
@@ -202,6 +199,70 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     
     const aiDecision = JSON.parse(textoResposta);
 
+    // --- INTENÇÃO: APAGAR ÚLTIMO ---
+    if (aiDecision.intent === "delete_last") {
+      try {
+        const lastExpense = await prisma.expense.findFirst({
+          where: { userId: user.id },
+          orderBy: { id: 'desc' }
+        });
+        if (!lastExpense) {
+          return res.status(200).json({ conversationId, assistantMessage: "Não encontrei nenhum lançamento recente seu para apagar! 🧐", cards: [] });
+        }
+        await prisma.expense.delete({ where: { id: lastExpense.id } });
+        return res.status(200).json({
+          conversationId,
+          assistantMessage: `🗑️ Feito! Eu apaguei o último lançamento que você fez (**${lastExpense.description}** de R$ ${(lastExpense.amountCents / 100).toFixed(2)}).`,
+          cards: [], suggestedActions: []
+        });
+      } catch (err) {
+        return res.status(200).json({ conversationId, assistantMessage: "Tive um problema ao tentar apagar o lançamento.", cards: [] });
+      }
+    }
+
+    // --- NOVA INTENÇÃO: COMPARAÇÃO ENTRE MESES ---
+    if (aiDecision.intent === "compare") {
+      try {
+        const month1 = aiDecision.targetMonth || currentMonth;
+        const month2 = aiDecision.compareMonth || lastMonth;
+
+        const summary1 = await tool_getDashboardSummary(user.id, month1);
+        const summary2 = await tool_getDashboardSummary(user.id, month2);
+
+        const diffCents = summary1.totalExpensesCents - summary2.totalExpensesCents;
+        const economizou = diffCents <= 0;
+        const diffFormatada = formatCurrency(Math.abs(diffCents));
+
+        let resposta = aiDecision.reply;
+        if (!resposta || resposta.length < 10) {
+          resposta = economizou 
+            ? `Parabéns! 🥳 Você gastou **${diffFormatada} a menos** em ${month1} comparado a ${month2}. Continue assim!`
+            : `Atenção! 🚨 Você gastou **${diffFormatada} a mais** em ${month1} comparado a ${month2}. Vamos segurar os gastos?`;
+        }
+
+        const cards = [{
+          type: "metric",
+          title: `Comparativo: ${month1} vs ${month2}`,
+          data: {
+            // Se economizou, fica positivo (verde). Se gastou mais, fica negativo (vermelho)
+            value: economizou ? Math.abs(diffCents) : -Math.abs(diffCents), 
+            currency: "BRL",
+            detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}`
+          }
+        }];
+
+        return res.status(200).json({
+          conversationId,
+          assistantMessage: resposta,
+          cards,
+          suggestedActions: [{ label: "Ver resumo do mês" }]
+        });
+      } catch (err) {
+        return res.status(200).json({ conversationId, assistantMessage: "Deu um errinho ao buscar a comparação dos meses no banco.", cards: [] });
+      }
+    }
+
+    // --- INTENÇÃO: DASHBOARD ---
     if (aiDecision.intent === "dashboard") {
       const payload = await buildAssistantResponse(user.id, aiDecision.targetMonth, message);
       return res.status(200).json({
@@ -212,11 +273,10 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       });
     }
 
+    // --- INTENÇÃO: REGISTRAR DESPESA ---
     if (aiDecision.intent === "expense") {
       try {
         const amountCents = Math.round(aiDecision.expenseDetails.amount * 100);
-        
-        // 1. Busca ou Cria a Categoria dinamicamente
         const categoryName = aiDecision.expenseDetails.category || "Outros";
         const normalizedName = categoryName.toLowerCase().trim();
         
@@ -230,7 +290,6 @@ router.post("/chat", async (req: AuthedRequest, res) => {
           });
         }
 
-        // 2. Salva a despesa oficial no banco com todos os campos obrigatórios
         await prisma.expense.create({
           data: {
             userId: user.id,
@@ -246,22 +305,16 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
         return res.status(200).json({
           conversationId,
-          assistantMessage: `${aiDecision.reply}\n\n✅ Lançamento salvo com sucesso!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 R$ ${aiDecision.expenseDetails.amount.toFixed(2)}\n📂 ${categoryName}`,
+          assistantMessage: `${aiDecision.reply}\n\n✅ Lançamento salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 R$ ${aiDecision.expenseDetails.amount.toFixed(2)}\n📂 ${categoryName}`,
           cards: [],
-          suggestedActions: [{ label: "Ver resumo do mês" }, { label: "Lançar outro" }]
+          suggestedActions: [{ label: "Desfazer último" }, { label: "Comparar com mês passado" }]
         });
-        
       } catch (dbError) {
-        console.error("❌ Erro do Prisma ao salvar despesa:", dbError);
-        return res.status(200).json({
-          conversationId,
-          assistantMessage: "Eu entendi o seu gasto, mas ocorreu um erro no banco de dados ao salvar. Veja o terminal.",
-          cards: [], suggestedActions: []
-        });
+        return res.status(200).json({ conversationId, assistantMessage: "Entendi o gasto, mas ocorreu um erro no banco ao salvar.", cards: [] });
       }
     }
 
-    // "chat"
+    // --- "chat" ---
     return res.status(200).json({
       conversationId,
       assistantMessage: aiDecision.reply,
@@ -270,7 +323,6 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Erro da IA:", err);
     return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento. Tente novamente.", cards: [] });
   }
 });
