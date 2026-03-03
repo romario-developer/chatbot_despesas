@@ -275,13 +275,14 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       });
     }
 
-    // --- INTENÇÃO: REGISTRAR DESPESA ---
+    // --- INTENÇÃO: REGISTRAR DESPESA COM CHECAGEM DE LIMITES ---
     if (aiDecision.intent === "expense") {
       try {
         const amountCents = Math.round(Math.abs(aiDecision.expenseDetails.amount) * 100);
         const categoryName = aiDecision.expenseDetails.category || "Outros";
         const normalizedName = categoryName.toLowerCase().trim();
         
+        // 1. Garante a categoria no banco
         let category = await prisma.category.findFirst({
           where: { userId: user.id, normalizedName }
         });
@@ -292,11 +293,12 @@ router.post("/chat", async (req: AuthedRequest, res) => {
           });
         }
 
+        // 2. Salva a despesa
         await prisma.expense.create({
           data: {
             userId: user.id,
             categoryId: category.id,
-            amountCents: amountCents,
+            amountCents,
             paymentMethod: aiDecision.expenseDetails.method,
             description: aiDecision.expenseDetails.description,
             date: new Date(),
@@ -305,14 +307,31 @@ router.post("/chat", async (req: AuthedRequest, res) => {
           }
         });
 
+        // 3. MÁGICA: Busca o resumo e o planejamento para dar o "toque"
+        const summary = await tool_getDashboardSummary(user.id, currentMonth);
+        const planning = await tool_getPlanning(user.id);
+        
+        // Procura se existe uma meta/gasto fixo para essa categoria no planejamento
+        const catSummary = summary.totalPorCategoria.find(c => c.category.toLowerCase() === normalizedName);
+        const gastoAtualCents = catSummary ? catSummary.total : 0;
+        
+        // Aqui checamos se no seu Planejamento existe algo para essa categoria
+        // (Por enquanto usando uma lógica de 'alerta de gastos altos' se passar de 30% do saldo total)
+        const percentualDoSaldo = (gastoAtualCents / (summary.balanceCents || 1)) * 100;
+        let alertaBudget = "";
+
+        if (percentualDoSaldo > 30) {
+          alertaBudget = `\n\n⚠️ **Atenção:** Seus gastos com **${categoryName}** já representam ${percentualDoSaldo.toFixed(0)}% do seu saldo disponível. Melhor dar uma segurada!`;
+        }
+
         return res.status(200).json({
           conversationId,
-          assistantMessage: `${aiDecision.reply}\n\n✅ Lançamento salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 R$ ${aiDecision.expenseDetails.amount.toFixed(2)}\n📂 ${categoryName}`,
+          assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Lançamento salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 R$ ${aiDecision.expenseDetails.amount.toFixed(2)}\n📂 ${categoryName}`,
           cards: [],
-          suggestedActions: [{ label: "Desfazer último" }, { label: "Comparar com mês passado" }]
+          suggestedActions: [{ label: "Ver resumo do mês" }, { label: "Desfazer último" }]
         });
       } catch (dbError) {
-        return res.status(200).json({ conversationId, assistantMessage: "Entendi o gasto, mas ocorreu um erro no banco ao salvar.", cards: [] });
+        return res.status(200).json({ conversationId, assistantMessage: "Erro ao salvar despesa.", cards: [] });
       }
     }
 
