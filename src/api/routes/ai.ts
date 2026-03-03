@@ -135,7 +135,8 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       1. "chat": Saudação ou conversa.
       2. "expense": Registrar gasto numérico.
       3. "dashboard": Resumos ou relatórios.
-      4. "delete_last": Apagar último lançamento.
+      4. "delete_last": Apagar último
+       lançamento.
       5. "compare": Comparar meses.
       6. "set_budget": Definir limite/meta de gastos.
       7. "set_name": O usuário informou o nome dele para cadastro inicial.
@@ -176,25 +177,49 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     // --- 1. INTENÇÃO: DEFINIR META (SET_BUDGET) ---
     if (aiDecision.intent === "set_budget") {
       try {
+        // TRAVA DE SEGURANÇA: Se a IA não trouxer valor ou categoria, pede pra repetir
+        if (!aiDecision.expenseDetails || !aiDecision.expenseDetails.amount || !aiDecision.expenseDetails.category) {
+          return res.status(200).json({
+            conversationId,
+            assistantMessage: "Ops, eu me confundi e não consegui pegar o valor exato ou a categoria da sua meta. 😅 Poderia mandar novamente de forma mais direta?",
+            cards: [], suggestedActions: []
+          });
+        }
+
         const amountCents = Math.round(Math.abs(aiDecision.expenseDetails.amount) * 100);
         const categoryName = aiDecision.expenseDetails.category;
+        const normalizedName = categoryName.toLowerCase().trim();
+
+        // NOVIDADE: Cria a categoria caso o usuário crie uma meta para algo novo
+        let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName } });
+        if (!category) {
+          category = await prisma.category.create({ data: { userId: user.id, name: categoryName, normalizedName } });
+        }
 
         let planning = await prisma.planning.findFirst({ where: { userId: user.id } });
-        if (!planning) planning = await prisma.planning.create({ data: { userId: user.id, data: { categoryBudgets: {} } } });
+        if (!planning) {
+          planning = await prisma.planning.create({ data: { userId: user.id, data: { categoryBudgets: {} } } });
+        }
 
         const currentData = (planning.data as any) || {};
         if (!currentData.categoryBudgets) currentData.categoryBudgets = {};
+        
+        // Salva a meta usando o nome oficial da categoria
         currentData.categoryBudgets[categoryName] = amountCents;
 
         await prisma.planning.update({ where: { id: planning.id }, data: { data: currentData } });
 
         return res.status(200).json({
           conversationId,
-          assistantMessage: `✅ Meta para **${categoryName}** definida em **${formatCurrency(amountCents)}**.`,
-          cards: [], suggestedActions: [{ label: "Quanto já gastei em " + categoryName }]
+          assistantMessage: `✅ Perfeito! Sua meta para **${categoryName}** foi registrada em **${formatCurrency(amountCents)}**. Vou ficar de olho! 👀`,
+          cards: [], suggestedActions: [{ label: "Ver resumos" }]
         });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Problema ao salvar meta." });
+        // ERRO HUMANIZADO
+        return res.status(200).json({ 
+          conversationId, 
+          assistantMessage: "Ops, tive um contratempo técnico ao tentar salvar sua meta no banco de dados. 😔 Poderia tentar enviar novamente?" 
+        });
       }
     }
 
@@ -240,7 +265,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
           cards: [], suggestedActions: [{ label: "Ver resumos" }, { label: "Desfazer último" }]
         });
       } catch (dbError) {
-        return res.status(200).json({ conversationId, assistantMessage: "Erro ao salvar despesa." });
+        return res.status(200).json({ conversationId, assistantMessage: "Ops, dei um tropeço aqui ao salvar esse lançamento. Pode mandar de novo? 🙏" });
       }
     }
 
@@ -253,7 +278,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         await prisma.expense.delete({ where: { id: lastExpense.id } });
         return res.status(200).json({ conversationId, assistantMessage: `🗑️ Apaguei: **${lastExpense.description}**.` });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Problema ao apagar." });
+        return res.status(200).json({ conversationId, assistantMessage: "Putz, não consegui apagar a última despesa. Pode tentar de novo? 😅" });
       }
     }
 
@@ -275,7 +300,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         let resposta = aiDecision.reply || (economizou ? `Gastou **${formatCurrency(Math.abs(diffCents))} a menos**.` : `Gastou **${formatCurrency(Math.abs(diffCents))} a mais**.`);
         return res.status(200).json({ conversationId, assistantMessage: resposta, cards, suggestedActions: [] });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Erro ao comparar." });
+        return res.status(200).json({ conversationId, assistantMessage: "Não conseguir comparar, pode me mandar novamente de forma mais clara? 😅." });
       }
     }
 
