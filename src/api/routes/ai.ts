@@ -335,7 +335,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
   } catch (err) {
     console.error("Erro Fatal IA:", err);
-    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho." });
+    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho!" });
   }
 });
 
