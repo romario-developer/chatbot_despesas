@@ -40,7 +40,6 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
 
   const lower = message.toLowerCase();
   const asksForCards = /cartão|cartao|fatura|parcelas|credito|crédito/.test(lower);
-  const asksForPlanning = /planejamento|meta|comparar|corte|previsão|projeção/.test(lower);
 
   const cards: Array<Record<string, any>> = [];
   cards.push({
@@ -55,28 +54,14 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
 
   if (summary.totalPorCategoria.length) {
     cards.push({
-      type: "list",
-      title: "Top categorias",
-      data: {
-        items: summary.totalPorCategoria.slice(0, 3).map((item) => ({
-          title: item.category,
-          value: item.total,
-          formattedValue: formatCurrency(item.total),
-          percent: Number(((item.total / (summary.totalExpensesCents || 1)) * 100).toFixed(1)),
-        })),
-      },
+      type: "chart",
+      title: "Gastos por Categoria",
+      data: summary.totalPorCategoria.slice(0, 4).map(item => ({
+        name: item.category,
+        value: item.total
+      }))
     });
   }
-
-  // Gráfico da IA
-  cards.push({
-    type: "chart",
-    title: "Gastos por Categoria",
-    data: summary.totalPorCategoria.slice(0, 4).map(item => ({
-      name: item.category,
-      value: item.total
-    }))
-  });
 
   if (topEntries.length) {
     cards.push({
@@ -96,59 +81,12 @@ async function buildAssistantResponse(userId: number, targetMonth: string, messa
     });
   }
 
-  let invoicesResponse: Awaited<ReturnType<typeof tool_getOpenInvoices>> | undefined;
-  if (asksForCards) {
-    invoicesResponse = await tool_getOpenInvoices(userId);
-    toolsUsed.add("tool_getOpenInvoices");
-    const openInvoices = invoicesResponse.filter((invoice) => invoice.remaining > 0);
-    if (openInvoices.length) {
-      cards.push({
-        type: "summary",
-        title: "Faturas em aberto",
-        data: {
-          invoices: openInvoices.map((invoice) => ({
-            cardName: invoice.cardName,
-            remaining: invoice.remaining,
-            formattedRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(invoice.remaining),
-            dueDate: invoice.dueDate,
-            purchases: invoice.purchases 
-          })),
-          totalRemaining: openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0),
-          formattedTotalRemaining: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(openInvoices.reduce((sum, invoice) => sum + invoice.remaining, 0)),
-        },
-      });
-    }
-  }
-
-  if (asksForPlanning) {
-    const planned = planning.salaryByMonth[targetMonth] ?? 0;
-    const extras = (planning.extrasByMonth[targetMonth] ?? []).reduce((sum, item) => sum + item.amount, 0);
-    const plannedTotal = planned + extras;
-    const difference = plannedTotal - summary.totalExpensesCents;
-    cards.push({
-      type: "metric",
-      title: "Planejamento mensal",
-      data: {
-        value: difference,
-        currency: "BRL",
-        detail: `Planejado: ${formatCurrency(plannedTotal)} • Realizado: ${formatCurrency(summary.totalExpensesCents)}`,
-      },
-    });
-  }
-
-  const previousMonth = dayjs(`${targetMonth}-01`).tz(TZ).subtract(1, "month").format("YYYY-MM");
   const suggestedActions = [
     { id: "ai-top-expenses", label: "Ver maiores gastos", payload: { kind: "topEntries", month: targetMonth } },
-    { id: "ai-compare-month", label: "Comparar com mês passado", payload: { kind: "compareMonth", month: previousMonth } }
+    { id: "ai-compare-month", label: "Comparar com mês passado", payload: { kind: "compareMonth" } }
   ];
 
-  const baseMessage = `No mês de ${targetMonth} você teve ${summary.expensesCount} lançamentos, totalizando ${formatCurrency(summary.totalExpensesCents)}. O saldo em conta está em ${formatCurrency(summary.balanceCents)}.`;
-  let assistantMessage = baseMessage;
-  
-  if (asksForCards && invoicesResponse && invoicesResponse.length) {
-    const openCount = invoicesResponse.filter((invoice) => invoice.remaining > 0).length;
-    assistantMessage += ` Há ${openCount} fatura(s) com valores pendentes.`;
-  }
+  const assistantMessage = `No mês de ${targetMonth} você teve ${summary.expensesCount} lançamentos, totalizando ${formatCurrency(summary.totalExpensesCents)}. O saldo em conta está em ${formatCurrency(summary.balanceCents)}.`;
 
   return { assistantMessage, cards, suggestedActions, toolsUsed: Array.from(toolsUsed) };
 }
@@ -174,25 +112,24 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       O usuário possui estas categorias: [${categoryNames || "Nenhuma ainda"}].
       Mensagem do usuário: "${message}"
 
-      Seu objetivo é analisar o texto e retornar APENAS um objeto JSON válido, sem usar \`\`\`json.
+      Seu objetivo é analisar o texto e retornar APENAS um objeto JSON válido.
 
       Regras de Intenção (intent):
       1. "chat": Saudação, dúvidas gerais.
-      2. "expense": Registrar um gasto numérico. Se a categoria não existir, CRIE UMA NOVA IDEAL. Dê conselhos financeiros se achar o gasto fútil.
-      3. "dashboard": Pedir para ver relatórios, resumos.
+      2. "expense": Registrar um gasto. "amount" DEVE SER SEMPRE POSITIVO. Se a categoria não existir, crie uma ideal.
+      3. "dashboard": Pedir para ver relatórios, saldos ou resumos.
       4. "delete_last": O usuário pediu para apagar ou desfazer o último lançamento.
-      5. "compare": O usuário pediu para comparar os gastos entre dois meses (ex: "gastei mais esse mês do que o passado?", "comparar março e fevereiro").
+      5. "compare": Comparar os gastos entre dois meses (ex: "gastei mais que o passado?").
+      6. "set_budget": O usuário definiu um limite/meta de gastos para uma categoria (ex: "minha meta pra lazer é 200"). "amount" DEVE SER O VALOR DA META POSITIVO.
 
       Formato de Saída OBRIGATÓRIO (Mapeie method para CREDIT, PIX, DEBIT, CASH, TRANSFER ou OTHER):
       {
-        "intent": "chat" | "expense" | "dashboard" | "delete_last" | "compare",
+        "intent": "chat" | "expense" | "dashboard" | "delete_last" | "compare" | "set_budget",
         "targetMonth": "${currentMonth}", 
         "compareMonth": "${lastMonth}", 
-        "reply": "Sua resposta humana aqui",
+        "reply": "Sua resposta humanizada aqui",
         "expenseDetails": { "description": "Nome", "amount": 0, "method": "PIX", "category": "NomeDaCategoria" }
       }
-
-      "amount": 0 (USE SEMPRE VALOR POSITIVO)
     `;
 
     const result = await aiModel.generateContent(prompt);
@@ -201,146 +138,157 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     
     const aiDecision = JSON.parse(textoResposta);
 
-    // --- INTENÇÃO: APAGAR ÚLTIMO ---
-    if (aiDecision.intent === "delete_last") {
+    // --- 1. INTENÇÃO: DEFINIR META (SET_BUDGET) ---
+    if (aiDecision.intent === "set_budget") {
       try {
-        const lastExpense = await prisma.expense.findFirst({
-          where: { userId: user.id },
-          orderBy: { id: 'desc' }
-        });
-        if (!lastExpense) {
-          return res.status(200).json({ conversationId, assistantMessage: "Não encontrei nenhum lançamento recente seu para apagar! 🧐", cards: [] });
-        }
-        await prisma.expense.delete({ where: { id: lastExpense.id } });
-        return res.status(200).json({
-          conversationId,
-          assistantMessage: `🗑️ Feito! Eu apaguei o último lançamento que você fez (**${lastExpense.description}** de R$ ${(lastExpense.amountCents / 100).toFixed(2)}).`,
-          cards: [], suggestedActions: []
-        });
-      } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Tive um problema ao tentar apagar o lançamento.", cards: [] });
-      }
-    }
+        const amountCents = Math.round(Math.abs(aiDecision.expenseDetails.amount) * 100);
+        const categoryName = aiDecision.expenseDetails.category;
 
-    // --- NOVA INTENÇÃO: COMPARAÇÃO ENTRE MESES ---
-    if (aiDecision.intent === "compare") {
-      try {
-        const month1 = aiDecision.targetMonth || currentMonth;
-        const month2 = aiDecision.compareMonth || lastMonth;
+        let planning = await prisma.planning.findFirst({ where: { userId: user.id } });
 
-        const summary1 = await tool_getDashboardSummary(user.id, month1);
-        const summary2 = await tool_getDashboardSummary(user.id, month2);
-
-        const diffCents = summary1.totalExpensesCents - summary2.totalExpensesCents;
-        const economizou = diffCents <= 0;
-        const diffFormatada = formatCurrency(Math.abs(diffCents));
-
-        let resposta = aiDecision.reply;
-        if (!resposta || resposta.length < 10) {
-          resposta = economizou 
-            ? `Parabéns! 🥳 Você gastou **${diffFormatada} a menos** em ${month1} comparado a ${month2}. Continue assim!`
-            : `Atenção! 🚨 Você gastou **${diffFormatada} a mais** em ${month1} comparado a ${month2}. Vamos segurar os gastos?`;
+        if (!planning) {
+          planning = await prisma.planning.create({
+            data: { userId: user.id, data: { categoryBudgets: {} } }
+          });
         }
 
-        const cards = [{
-          type: "metric",
-          title: `Comparativo: ${month1} vs ${month2}`,
-          data: {
-            // Se economizou, fica positivo (verde). Se gastou mais, fica negativo (vermelho)
-            value: economizou ? Math.abs(diffCents) : -Math.abs(diffCents), 
-            currency: "BRL",
-            detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}`
-          }
-        }];
+        const currentData = (planning.data as any) || {};
+        if (!currentData.categoryBudgets) currentData.categoryBudgets = {};
+        
+        // Salva a meta em centavos
+        currentData.categoryBudgets[categoryName] = amountCents;
+
+        await prisma.planning.update({
+          where: { id: planning.id },
+          data: { data: currentData }
+        });
 
         return res.status(200).json({
           conversationId,
-          assistantMessage: resposta,
-          cards,
-          suggestedActions: [{ label: "Ver resumo do mês" }]
+          assistantMessage: `✅ Tudo certo! Sua meta de gastos para **${categoryName}** foi definida em **${formatCurrency(amountCents)}**. Vou monitorar para você!`,
+          cards: [], suggestedActions: [{ label: "Quanto já gastei em " + categoryName }]
         });
       } catch (err) {
-        return res.status(200).json({ conversationId, assistantMessage: "Deu um errinho ao buscar a comparação dos meses no banco.", cards: [] });
+        return res.status(200).json({ conversationId, assistantMessage: "Tive um problema ao salvar sua meta no banco.", cards: [] });
       }
     }
 
-    // --- INTENÇÃO: DASHBOARD ---
-    if (aiDecision.intent === "dashboard") {
-      const payload = await buildAssistantResponse(user.id, aiDecision.targetMonth, message);
-      return res.status(200).json({
-        conversationId,
-        assistantMessage: aiDecision.reply || payload.assistantMessage,
-        cards: payload.cards,
-        suggestedActions: payload.suggestedActions,
-      });
-    }
-
-    // --- INTENÇÃO: REGISTRAR DESPESA COM CHECAGEM DE LIMITES ---
+    // --- 2. INTENÇÃO: REGISTRAR DESPESA E CHECAR METAS ---
     if (aiDecision.intent === "expense") {
       try {
         const amountCents = Math.round(Math.abs(aiDecision.expenseDetails.amount) * 100);
         const categoryName = aiDecision.expenseDetails.category || "Outros";
         const normalizedName = categoryName.toLowerCase().trim();
         
-        // 1. Garante a categoria no banco
-        let category = await prisma.category.findFirst({
-          where: { userId: user.id, normalizedName }
-        });
-
+        let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName } });
         if (!category) {
-          category = await prisma.category.create({
-            data: { userId: user.id, name: categoryName, normalizedName }
-          });
+          category = await prisma.category.create({ data: { userId: user.id, name: categoryName, normalizedName } });
         }
 
-        // 2. Salva a despesa
+        // Salva a despesa
         await prisma.expense.create({
           data: {
-            userId: user.id,
-            categoryId: category.id,
-            amountCents,
+            userId: user.id, categoryId: category.id, amountCents,
             paymentMethod: aiDecision.expenseDetails.method,
             description: aiDecision.expenseDetails.description,
-            date: new Date(),
-            source: 'AI_CHAT',
-            rawText: message
+            date: new Date(), source: 'AI_CHAT', rawText: message
           }
         });
 
-        // 3. MÁGICA: Busca o resumo e o planejamento para dar o "toque"
+        // Verificando a meta (Budget)
         const summary = await tool_getDashboardSummary(user.id, currentMonth);
-        const planning = await tool_getPlanning(user.id);
+        const planning = await prisma.planning.findFirst({ where: { userId: user.id } });
         
-        // Procura se existe uma meta/gasto fixo para essa categoria no planejamento
+        const currentData = (planning?.data as any) || {};
+        const budgets = currentData.categoryBudgets || {};
+        
+        // Procura a meta (aceita variações de maiúsculas/minúsculas)
+        const metaEncontradaKey = Object.keys(budgets).find(k => k.toLowerCase() === normalizedName);
+        const budgetCents = metaEncontradaKey ? budgets[metaEncontradaKey] : 0;
+        
         const catSummary = summary.totalPorCategoria.find(c => c.category.toLowerCase() === normalizedName);
-        const gastoAtualCents = catSummary ? catSummary.total : 0;
-        
-        // Aqui checamos se no seu Planejamento existe algo para essa categoria
-        // (Por enquanto usando uma lógica de 'alerta de gastos altos' se passar de 30% do saldo total)
-        const percentualDoSaldo = (gastoAtualCents / (summary.balanceCents || 1)) * 100;
-        let alertaBudget = "";
+        const totalGastoAtual = catSummary ? catSummary.total : 0;
 
-        if (percentualDoSaldo > 30) {
-          alertaBudget = `\n\n⚠️ **Atenção:** Seus gastos com **${categoryName}** já representam ${percentualDoSaldo.toFixed(0)}% do seu saldo disponível. Melhor dar uma segurada!`;
+        let alertaBudget = "";
+        if (budgetCents > 0) {
+          const percentual = (totalGastoAtual / budgetCents) * 100;
+          if (percentual >= 100) {
+            alertaBudget = `\n\n🚨 **LIMITE ESTOURADO:** Você já gastou ${formatCurrency(totalGastoAtual)} e ultrapassou sua meta de ${formatCurrency(budgetCents)} para ${categoryName}!`;
+          } else if (percentual >= 80) {
+            alertaBudget = `\n\n⚠️ **ATENÇÃO:** Você já atingiu ${percentual.toFixed(0)}% da sua meta de ${categoryName}. Restam apenas ${formatCurrency(budgetCents - totalGastoAtual)}!`;
+          }
         }
 
         return res.status(200).json({
           conversationId,
-          assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Lançamento salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 R$ ${aiDecision.expenseDetails.amount.toFixed(2)}\n📂 ${categoryName}`,
-          cards: [],
-          suggestedActions: [{ label: "Ver resumo do mês" }, { label: "Desfazer último" }]
+          assistantMessage: `${aiDecision.reply}${alertaBudget}\n\n✅ Lançamento salvo!\n🛒 **${aiDecision.expenseDetails.description}**\n💰 ${formatCurrency(amountCents)}\n📂 ${categoryName}`,
+          cards: [], suggestedActions: [{ label: "Ver resumos" }, { label: "Desfazer último" }]
         });
       } catch (dbError) {
-        return res.status(200).json({ conversationId, assistantMessage: "Erro ao salvar despesa.", cards: [] });
+        return res.status(200).json({ conversationId, assistantMessage: "Erro ao salvar despesa no banco.", cards: [] });
       }
     }
 
-    // --- "chat" ---
+    // --- 3. INTENÇÃO: APAGAR ÚLTIMO ---
+    if (aiDecision.intent === "delete_last") {
+      try {
+        const lastExpense = await prisma.expense.findFirst({ where: { userId: user.id }, orderBy: { id: 'desc' } });
+        if (!lastExpense) {
+          return res.status(200).json({ conversationId, assistantMessage: "Não encontrei nenhum lançamento recente para apagar!", cards: [] });
+        }
+        await prisma.expense.delete({ where: { id: lastExpense.id } });
+        return res.status(200).json({
+          conversationId,
+          assistantMessage: `🗑️ Feito! Eu apaguei: **${lastExpense.description}** (${formatCurrency(lastExpense.amountCents)}).`,
+          cards: [], suggestedActions: []
+        });
+      } catch (err) {
+        return res.status(200).json({ conversationId, assistantMessage: "Tive um problema ao apagar.", cards: [] });
+      }
+    }
+
+    // --- 4. INTENÇÃO: COMPARAÇÃO ---
+    if (aiDecision.intent === "compare") {
+      try {
+        const month1 = aiDecision.targetMonth || currentMonth;
+        const month2 = aiDecision.compareMonth || lastMonth;
+        const summary1 = await tool_getDashboardSummary(user.id, month1);
+        const summary2 = await tool_getDashboardSummary(user.id, month2);
+        const diffCents = summary1.totalExpensesCents - summary2.totalExpensesCents;
+        const economizou = diffCents <= 0;
+
+        const cards = [{
+          type: "metric", title: `Comparativo: ${month1} vs ${month2}`,
+          data: {
+            value: economizou ? Math.abs(diffCents) : -Math.abs(diffCents), 
+            currency: "BRL",
+            detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}`
+          }
+        }];
+
+        let resposta = aiDecision.reply;
+        if (!resposta || resposta.length < 10) {
+          resposta = economizou ? `Parabéns! Você gastou **${formatCurrency(Math.abs(diffCents))} a menos** em ${month1}.` : `Atenção! Você gastou **${formatCurrency(Math.abs(diffCents))} a mais** em ${month1}.`;
+        }
+
+        return res.status(200).json({ conversationId, assistantMessage: resposta, cards, suggestedActions: [] });
+      } catch (err) {
+        return res.status(200).json({ conversationId, assistantMessage: "Erro ao comparar os meses.", cards: [] });
+      }
+    }
+
+    // --- 5. INTENÇÃO: DASHBOARD ---
+    if (aiDecision.intent === "dashboard") {
+      const payload = await buildAssistantResponse(user.id, aiDecision.targetMonth, message);
+      return res.status(200).json({
+        conversationId, assistantMessage: aiDecision.reply || payload.assistantMessage,
+        cards: payload.cards, suggestedActions: payload.suggestedActions,
+      });
+    }
+
+    // --- 6. "CHAT" GENÉRICO ---
     return res.status(200).json({
-      conversationId,
-      assistantMessage: aiDecision.reply,
-      cards: [],
-      suggestedActions: [{ label: "Ver resumos" }]
+      conversationId, assistantMessage: aiDecision.reply, cards: [], suggestedActions: [{ label: "Ver resumos" }]
     });
 
   } catch (err) {
