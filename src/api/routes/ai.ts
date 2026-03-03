@@ -191,6 +191,8 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         "reply": "Sua resposta humana aqui",
         "expenseDetails": { "description": "Nome", "amount": 0, "method": "PIX", "category": "NomeDaCategoria" }
       }
+
+      "amount": 0 (USE SEMPRE VALOR POSITIVO)
     `;
 
     const result = await aiModel.generateContent(prompt);
@@ -276,7 +278,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     // --- INTENÇÃO: REGISTRAR DESPESA ---
     if (aiDecision.intent === "expense") {
       try {
-        const amountCents = Math.round(aiDecision.expenseDetails.amount * 100);
+        const amountCents = Math.round(Math.abs(aiDecision.expenseDetails.amount) * 100);
         const categoryName = aiDecision.expenseDetails.category || "Outros";
         const normalizedName = categoryName.toLowerCase().trim();
         
