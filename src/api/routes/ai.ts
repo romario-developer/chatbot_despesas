@@ -28,6 +28,30 @@ const requestSchema = z.object({
   conversationId: z.string().optional(),
 });
 
+// --- NOVO: FILTRO EXTRATOR DE VALORES A PROVA DE FALHAS ---
+function extractMoneyCents(aiAmount: any, userText: string): number {
+  let val = Number(aiAmount);
+  
+  // Se a IA falhou em devolver um número, caçamos o número direto no texto do usuário!
+  if (isNaN(val) || val <= 0) {
+    const matches = userText.match(/\d+(?:[.,]\d+)*/g);
+    if (matches && matches.length > 0) {
+      let strVal = matches[0];
+      if (strVal.includes(',')) {
+        strVal = strVal.replace(/\./g, '').replace(',', '.');
+      } else if (strVal.split('.').length > 2) {
+         strVal = strVal.replace(/\./g, '');
+      }
+      val = Number(strVal);
+    }
+  }
+
+  if (!isNaN(val) && val > 0) {
+    return Math.round(val * 100);
+  }
+  return 0;
+}
+
 async function buildAssistantResponse(userId: number, targetMonth: string, message: string) {
   const toolsUsed = new Set<string>();
   const summary = await tool_getDashboardSummary(userId, targetMonth);
@@ -120,7 +144,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
       COMPORTAMENTO E PERSONALIDADE:
       ${isNewUser ? 
-        `- O NOME DO USUÁRIO ESTÁ VAZIO. Se a mensagem for um nome, classifique OBRIGATORIAMENTE como "set_name". Responda confirmando que gravou o nome e seja simpático (ex: "Muito prazer, [Nome]!"). NUNCA escreva "Novo Usuário".` : 
+        `- O NOME DO USUÁRIO ESTÁ VAZIO. Se a mensagem for um nome, classifique OBRIGATORIAMENTE como "set_name". Responda confirmando que gravou o nome e seja simpático (ex: "Muito prazer, [Nome]!").` : 
         `- O usuário se chama ${userName}. Chame-o pelo nome de forma natural.`
       }
 
@@ -136,15 +160,15 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       9. "set_savings": Definir o valor guardado na poupança/reserva.
       10. "set_name": Salvar o nome inicial do usuário.
 
-      Formato de Saída OBRIGATÓRIO (Gere apenas o JSON, sem marcadores):
+      Formato de Saída OBRIGATÓRIO (Gere apenas o JSON):
       {
         "intent": "chat" | "expense" | "dashboard" | "delete_last" | "compare" | "set_budget" | "set_salary" | "add_extra" | "set_savings" | "set_name",
-        "extractedName": "Nome capitalizado se set_name. Vazio caso contrário.",
+        "extractedName": "Nome extraído se for intent set_name. Vazio caso contrário.",
         "targetMonth": "${currentMonth}", 
         "reply": "Sua resposta amigável",
         "expenseDetails": { 
-          "description": "Nome do item ou categoria", 
-          "amount": "AQUI VAI O NÚMERO EXATO DO VALOR DA MENSAGEM (OBRIGATÓRIO)", 
+          "description": "Nome curto do item", 
+          "amount": 0, // Substitua pelo valor numérico extraído da mensagem (Ex: 1600)
           "method": "PIX", 
           "category": "Categoria" 
         }
@@ -154,14 +178,12 @@ router.post("/chat", async (req: AuthedRequest, res) => {
     const result = await aiModel.generateContent(prompt);
     let textoResposta = result.response.text().trim().replace(/```json/g, "").replace(/```/g, "").trim();
     
-    // Tratamento robusto para evitar o crash caso a IA fuja do JSON
     let aiDecision;
     try {
       const jsonMatch = textoResposta.match(/\{[\s\S]*\}/);
       aiDecision = JSON.parse(jsonMatch ? jsonMatch[0] : textoResposta);
     } catch (parseErr) {
-      console.error("Erro no Parse JSON da IA:", textoResposta);
-      return res.status(200).json({ conversationId, assistantMessage: "Desculpe, meu cérebro deu um nó na formatação dessa mensagem! Pode me falar isso de novo de forma mais direta?" });
+      return res.status(200).json({ conversationId, assistantMessage: "Desculpe, meu cérebro deu um nó na formatação! Pode mandar isso de forma mais direta?" });
     }
 
     // --- 0. SALVAR NOME ---
@@ -170,29 +192,19 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || `Muito prazer, ${aiDecision.extractedName}! Já gravei seu nome aqui.`, refreshData: true });
     }
 
-    // --- 1. SALÁRIO E RESERVAS E EXTRAS (Com Parser Reforçado) ---
+    // --- 1. SALÁRIO E RESERVAS E EXTRAS (Com Parser Blindado) ---
     if (["set_salary", "set_savings", "add_extra"].includes(aiDecision.intent)) {
       try {
-        let rawAmount = aiDecision.expenseDetails?.amount;
-        
-        // RESGATE: Se a IA enviar nulo ou zero, tentamos extrair o número direto da frase original!
-        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
-          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
-          if (match) rawAmount = match[0].replace(',', '.');
-        }
+        const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
 
-        const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
-
-        if (isNaN(amountCents) || amountCents <= 0) {
-          return res.status(200).json({ conversationId, assistantMessage: "Não consegui identificar o valor exato na mensagem. Poderia tentar de novo com o número claro? (Ex: 'Salário 1600')" });
+        if (amountCents === 0) {
+          return res.status(200).json({ conversationId, assistantMessage: "Não consegui identificar o valor exato na mensagem. Poderia tentar de novo apenas com o número? (Ex: 'Salário 1600')" });
         }
 
         let planning = await prisma.planning.findFirst({ where: { userId: user.id } });
         if (!planning) planning = await prisma.planning.create({ data: { userId: user.id, data: { salaryByMonth: {}, extrasByMonth: {}, savingsByMonth: {}, categoryBudgets: {} } } });
 
-        // Clone profundo para não perder nada!
         const currentData = JSON.parse(JSON.stringify(planning.data || {}));
-        
         if (!currentData.salaryByMonth) currentData.salaryByMonth = {};
         if (!currentData.savingsByMonth) currentData.savingsByMonth = {};
         if (!currentData.extrasByMonth) currentData.extrasByMonth = {};
@@ -218,20 +230,14 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       }
     }
 
-    // --- 2. DEFINIR META (Com Parser Reforçado) ---
+    // --- 2. DEFINIR META (Com Parser Blindado) ---
     if (aiDecision.intent === "set_budget") {
       try {
-        let rawAmount = aiDecision.expenseDetails?.amount;
-        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
-          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
-          if (match) rawAmount = match[0].replace(',', '.');
-        }
-
-        const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
+        const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
         const categoryName = aiDecision.expenseDetails?.category;
 
-        if (isNaN(amountCents) || amountCents <= 0 || !categoryName) {
-          return res.status(200).json({ conversationId, assistantMessage: "Não consegui pegar o valor ou a categoria da meta. Pode mandar de forma direta? (Ex: Meta Lazer 200)" });
+        if (amountCents === 0 || !categoryName) {
+          return res.status(200).json({ conversationId, assistantMessage: "Não consegui pegar o valor ou a categoria da meta. Pode mandar de forma direta? (Ex: 'Meta Lazer 200')" });
         }
 
         const safeCategoryKey = categoryName.toLowerCase().trim();
@@ -255,16 +261,15 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       }
     }
 
-    // --- 3. REGISTRAR DESPESA ---
+    // --- 3. REGISTRAR DESPESA (Com Parser Blindado) ---
     if (aiDecision.intent === "expense") {
       try {
-        let rawAmount = aiDecision.expenseDetails?.amount;
-        if (!rawAmount || isNaN(Number(rawAmount)) || Number(rawAmount) === 0) {
-          const match = message.match(/\b\d+([.,]\d{1,2})?\b/);
-          if (match) rawAmount = match[0].replace(',', '.');
+        const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
+        
+        if (amountCents === 0) {
+           return res.status(200).json({ conversationId, assistantMessage: "Romário, não achei o valor da despesa na sua frase. Pode mandar de novo? (Ex: 'Gastei 50 no mercado')" });
         }
 
-        const amountCents = Math.round(Math.abs(Number(rawAmount)) * 100);
         const categoryName = aiDecision.expenseDetails?.category || "Outros";
         const safeCategoryKey = categoryName.toLowerCase().trim();
         
@@ -335,7 +340,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
 
   } catch (err) {
     console.error("Erro Fatal IA:", err);
-    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho!" });
+    return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho." });
   }
 });
 
