@@ -98,12 +98,6 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       Categorias cadastradas: [${categoryNames || "Nenhuma ainda"}].
       Mensagem do usuário: "${message}"
 
-      COMPORTAMENTO E PERSONALIDADE:
-      ${isNewUser ? 
-        `- NOME VAZIO. Classifique como "set_name" se for um nome. Responda amigavelmente.` : 
-        `- O usuário se chama ${userName}.`
-      }
-
       Regras de Intenção (intent):
       1. "chat": Conversa geral.
       2. "expense": Registrar gasto numérico (Aceita parcelas e nome de cartão).
@@ -144,7 +138,6 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       return res.status(200).json({ conversationId, assistantMessage: "Desculpe, meu cérebro deu um nó! Pode mandar de novo?" });
     }
 
-    // NOME, PLANEJAMENTO E METAS... (Código das outras intenções permanece igual)
     if (aiDecision.intent === "set_name" && aiDecision.extractedName) {
       await prisma.user.update({ where: { id: user.id }, data: { name: aiDecision.extractedName } });
       return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || `Muito prazer, ${aiDecision.extractedName}!`, refreshData: true });
@@ -197,7 +190,7 @@ router.post("/chat", async (req: AuthedRequest, res) => {
       } catch (err) { return res.status(200).json({ conversationId, assistantMessage: "Problema técnico ao salvar a meta." }); }
     }
 
-    // --- 3. REGISTRAR DESPESA (MOTOR DE PARCELAMENTO E CARTÃO) ---
+    // --- 3. REGISTRAR DESPESA (MOTOR DE CARTÕES COM VÍNCULO CORRETO) ---
     if (aiDecision.intent === "expense") {
       try {
         const amountCents = extractMoneyCents(aiDecision.expenseDetails?.amount, message);
@@ -208,30 +201,40 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         let category = await prisma.category.findFirst({ where: { userId: user.id, normalizedName: safeCategoryKey } });
         if (!category) category = await prisma.category.create({ data: { userId: user.id, name: categoryName, normalizedName: safeCategoryKey } });
 
-        // BLINDAGEM DO MÉTODO DE PAGAMENTO
         let method = (aiDecision.expenseDetails?.method || "OTHER").toUpperCase();
         const msgLower = message.toLowerCase();
+        
         if (msgLower.includes("cartão") || msgLower.includes("crédito") || msgLower.includes("credit") || msgLower.includes("x ") || msgLower.match(/\dx/)) method = "CREDIT";
         else if (msgLower.includes("débito") || msgLower.includes("debit")) method = "DEBIT";
         else if (msgLower.includes("pix")) method = "PIX";
 
-        // BUSCA O CARTÃO DE CRÉDITO NO BANCO (Se aplicável)
+        // CAÇADOR DE CARTÕES FORÇA-BRUTA
         let cardId = null;
         let cardFoundName = "";
-        if (method === "CREDIT" && aiDecision.expenseDetails?.cardName) {
-            const cardName = aiDecision.expenseDetails.cardName.toLowerCase();
+        
+        if (method === "CREDIT") {
             const userCards = await prisma.card.findMany({ where: { userId: user.id } });
-            
-            const matchedCard = userCards.find(c => c.name.toLowerCase().includes(cardName) || cardName.includes(c.name.toLowerCase()));
+            const cName = (aiDecision.expenseDetails?.cardName || "").toLowerCase().trim();
+
+            // Tenta achar pelo nome direto na frase ou no que a IA entendeu
+            const matchedCard = userCards.find(c => {
+                const dbName = c.name.toLowerCase().trim();
+                return (cName && dbName.includes(cName)) || msgLower.includes(dbName);
+            });
+
             if (matchedCard) {
                 cardId = matchedCard.id;
                 cardFoundName = matchedCard.name;
+            } 
+            // Se o usuário tem SÓ UM cartão de crédito cadastrado, usa ele por padrão
+            else if (userCards.length === 1) {
+                cardId = userCards[0].id;
+                cardFoundName = userCards[0].name;
             }
         }
 
-        // MOTOR DE PARCELAMENTO
         let installments = aiDecision.expenseDetails?.installments || 1;
-        // Resgate rápido caso a IA não veja o "5x" mas ele exista na string
+        // Resgate caso a IA não retorne a parcela corretamente mas exista "5x" na frase
         const matchInstallment = msgLower.match(/(\d+)\s*x/);
         if (matchInstallment && installments === 1) installments = parseInt(matchInstallment[1], 10);
 
@@ -239,31 +242,30 @@ router.post("/chat", async (req: AuthedRequest, res) => {
         const installmentAmountCents = isInstallment ? Math.round(amountCents / installments) : amountCents;
         const baseDescription = aiDecision.expenseDetails?.description || "Gasto";
 
-        let baseDate = dayjs().tz(TZ);
+        // Cria a data da transação hoje, garantindo o horário do meio dia para evitar falhas de fuso horário
+        let baseDate = dayjs().tz(TZ).hour(12).minute(0).second(0);
         
-        // Se foi parcelado ou crédito, cria os lançamentos no banco!
         const expensesToCreate = [];
         for (let i = 1; i <= installments; i++) {
+            // Apenas lança os meses futuros perfeitamente!
             const expDate = baseDate.add(i - 1, 'month').toDate();
             expensesToCreate.push({
                 userId: user.id,
                 categoryId: category.id,
-                amountCents: installmentAmountCents, // Valor da parcela
+                amountCents: installmentAmountCents,
                 paymentMethod: method as any,
                 description: isInstallment ? `${baseDescription} (${i}/${installments})` : baseDescription,
-                date: expDate,
+                date: expDate, 
                 source: 'AI_CHAT',
                 rawText: message,
-                cardId: cardId, // Vincula ao cartão!
+                cardId: cardId, // AGORA A DESPESA NÃO FICA ÓRFÃ!
                 installmentCurrent: isInstallment ? i : null,
                 installmentTotal: isInstallment ? installments : null
             });
         }
 
-        // Salva todos de uma vez
         await Promise.all(expensesToCreate.map(data => prisma.expense.create({ data })));
 
-        // Resposta Humanizada
         const cardMsg = cardFoundName ? `no cartão **${cardFoundName}**` : `no **Crédito**`;
         const installmentMsg = isInstallment ? `dividido em **${installments}x de ${formatCurrency(installmentAmountCents)}**` : ``;
         
@@ -273,17 +275,47 @@ router.post("/chat", async (req: AuthedRequest, res) => {
             refreshData: true 
         });
       } catch (dbError) {
-        console.error("Erro Prisma Expense:", dbError);
         return res.status(200).json({ conversationId, assistantMessage: "Ops, erro ao salvar esse gasto. Tente novamente." });
       }
     }
 
-    if (aiDecision.intent === "delete_last") { /* mantido */ }
-    if (aiDecision.intent === "compare") { /* mantido */ }
-    if (aiDecision.intent === "dashboard") { /* mantido */ }
+    if (aiDecision.intent === "delete_last") {
+      try {
+        const lastExpense = await prisma.expense.findFirst({ where: { userId: user.id }, orderBy: { id: 'desc' } });
+        if (!lastExpense) return res.status(200).json({ conversationId, assistantMessage: "Nenhum lançamento recente encontrado." });
+        await prisma.expense.delete({ where: { id: lastExpense.id } });
+        return res.status(200).json({ conversationId, assistantMessage: `🗑️ Apaguei: **${lastExpense.description}**.`, refreshData: true });
+      } catch (err) { return res.status(200).json({ conversationId, assistantMessage: "Problema ao apagar." }); }
+    }
+
+    if (aiDecision.intent === "compare") {
+      try {
+        const month1 = aiDecision.targetMonth || currentMonth;
+        const month2 = aiDecision.compareMonth || lastMonth;
+        const summary1 = await tool_getDashboardSummary(user.id, month1);
+        const summary2 = await tool_getDashboardSummary(user.id, month2);
+        const diffCents = summary1.totalExpensesCents - summary2.totalExpensesCents;
+        const economizou = diffCents <= 0;
+
+        const cards = [{
+          type: "metric", title: `Comparativo: ${month1} vs ${month2}`,
+          data: { value: Math.abs(diffCents), currency: "BRL", detail: `${month1}: ${formatCurrency(summary1.totalExpensesCents)}\n${month2}: ${formatCurrency(summary2.totalExpensesCents)}` }
+        }];
+
+        let resposta = aiDecision.reply || (economizou ? `Gastou **${formatCurrency(Math.abs(diffCents))} a menos**.` : `Gastou **${formatCurrency(Math.abs(diffCents))} a mais**.`);
+        return res.status(200).json({ conversationId, assistantMessage: resposta, cards, suggestedActions: [] });
+      } catch (err) { return res.status(200).json({ conversationId, assistantMessage: "Não consegui comparar. Tente novamente de forma mais clara." }); }
+    }
+
+    if (aiDecision.intent === "dashboard") {
+      const payload = await buildAssistantResponse(user.id, aiDecision.targetMonth, message);
+      return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply || payload.assistantMessage, cards: payload.cards, suggestedActions: payload.suggestedActions });
+    }
 
     return res.status(200).json({ conversationId, assistantMessage: aiDecision.reply, cards: [], suggestedActions: [{ label: "Ver resumos" }] });
+
   } catch (err) {
+    console.error("Erro Fatal IA:", err);
     return res.status(200).json({ conversationId, assistantMessage: "Tive um problema de processamento grave, mas já estamos de olho." });
   }
 });
